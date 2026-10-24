@@ -43,6 +43,7 @@ function profileRow(overrides: Partial<AgentProfile> = {}): AgentProfile {
     greeting: "¡Hola! Soy Sofi 🦷",
     role: "calificador",
     tools: null,
+    welcomeMediaAssetId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -94,7 +95,13 @@ describe("serializeBotProfile", () => {
       kb: "P: ¿Cuánto cuesta?\nR: $800.",
       resources: [],
       llm: null,
+      welcomeMedia: null,
     });
+  });
+
+  it("video de bienvenida: viaja el tipo y su texto cuando hay uno", () => {
+    const welcome = { kind: "video", caption: "¿Cuentas con S/ 88,000?" };
+    expect(serializeBotProfile(profileRow(), [], null, welcome).welcomeMedia).toEqual(welcome);
   });
 
   it("036 — llm: el proxy y el modelo del negocio cuando hay con qué pensar", () => {

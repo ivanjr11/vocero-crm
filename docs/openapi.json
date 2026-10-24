@@ -41,6 +41,21 @@
         "x-codigos-409": ["ai_paused", "window_closed", "sandbox_violation", "message_limit", "no_org"]
       }
     },
+    "/api/bot/messages/bienvenida": {
+      "post": {
+        "summary": "Mandar el video de bienvenida",
+        "description": "Manda el video (o imagen) de bienvenida que el negocio subió en la pantalla Agente, con su texto. El archivo nunca sale del CRM. Cuándo mandarlo lo decide el cerebro: una vez por contacto, en su primera respuesta. Existe si `welcomeMedia` del perfil no es `null`. En una conversación de prueba del Laboratorio se guarda una marca en el hilo y no se envía.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["conversationId"], "properties": { "conversationId": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Enviado (o guardado, en una de prueba)", "content": { "application/json": { "schema": { "type": "object", "properties": { "messageId": { "type": "string" }, "status": { "type": "string", "enum": ["sent"] } }, "required": ["messageId"] } } } },
+          "404": { "description": "`sin_bienvenida`: no hay video configurado. `not_found`: la conversación no existe.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "`ai_paused`: una persona tomó la conversación. `window_closed`: la ventana del canal cerró. `message_limit`: el canal no admite más hasta que el cliente escriba. `sandbox_violation`: reservado. `no_org`.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "$ref": "#/components/responses/Invalido" },
+          "502": { "description": "WhatsApp rechazó el archivo o el envío, o el canal no admite adjuntos.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        },
+        "x-codigos-409": ["ai_paused", "window_closed", "sandbox_violation", "message_limit", "no_org"]
+      }
+    },
     "/api/bot/profile": {
       "get": {
         "summary": "Perfil del agente y conocimiento",
@@ -263,6 +278,13 @@
             "description": "036 — Con qué piensa un cerebro sin llave propia: `path` es el proxy (`/api/bot/llm`) y `model`, el modelo que eligió el negocio en Ajustes → IA. `null` sin proveedor de IA configurado o con la llave pausada.",
             "oneOf": [
               { "type": "object", "required": ["path", "model"], "properties": { "path": { "type": "string", "examples": ["/api/bot/llm"] }, "model": { "type": "string", "examples": ["openai/gpt-4o-mini"] } } },
+              { "type": "null" }
+            ]
+          },
+          "welcomeMedia": {
+            "description": "Video de bienvenida: qué manda `POST /api/bot/messages/bienvenida` (el tipo y su texto). `null` sin nada configurado.",
+            "oneOf": [
+              { "type": "object", "required": ["kind", "caption"], "properties": { "kind": { "type": "string", "examples": ["video"] }, "caption": { "type": ["string", "null"] } } },
               { "type": "null" }
             ]
           }
