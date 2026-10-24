@@ -1,0 +1,2 @@
+ALTER TABLE "agent_profile" ADD COLUMN "welcome_media_asset_id" text;--> statement-breakpoint
+ALTER TABLE "agent_profile" ADD CONSTRAINT "agent_profile_welcome_media_asset_id_media_asset_id_fk" FOREIGN KEY ("welcome_media_asset_id") REFERENCES "public"."media_asset"("id") ON DELETE set null ON UPDATE no action;

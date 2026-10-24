@@ -679,6 +679,8 @@ async function main() {
   });
   ok("texto vacío → 422 (no se manda un mensaje en blanco)", sendVacio.res.status === 422);
 
+  await bienvenidaChecks(convId);
+
   // Regresión: la hora del saliente debe ser la misma en las dos vistas.
   // Las columnas son `timestamp without time zone` y se llenan por dos caminos
   // — `now()` de los `defaultNow()` (marco de la SESIÓN de BD) y `Date` desde
@@ -1303,6 +1305,110 @@ async function main() {
  * entran como texto con el rótulo del botón, igual que si lo hubiera
  * tecleado. Los payloads del mock tienen la forma documentada por Meta.
  * ========================================================================== */
+/**
+ * Video de bienvenida: el dueño lo sube en el Agente y el cerebro lo pide por
+ * `POST /api/bot/messages/bienvenida`. Un solo asset para todos los envíos.
+ */
+async function bienvenidaChecks(convId) {
+  console.log("\n== video de bienvenida: el cerebro lo manda a través del CRM ==");
+  await api("/api/agent/welcome-media", { method: "DELETE" });
+
+  const sinVideo = await bot("/api/bot/messages/bienvenida", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: convId }),
+  });
+  ok(
+    "sin video configurado → 404 sin_bienvenida",
+    sinVideo.res.status === 404 && sinVideo.json?.error?.code === "sin_bienvenida",
+    JSON.stringify(sinVideo.json)
+  );
+
+  const subirCrudo = (bytes, type, nombre) =>
+    fetch(`${BASE}/api/agent/welcome-media`, {
+      method: "PUT",
+      headers: { cookie, origin: BASE, "content-type": type, "x-file-name": nombre },
+      body: bytes,
+    }).then(async (res) => ({ res, json: await res.json().catch(() => null) }));
+
+  const pdf = await subirCrudo(Buffer.from("%PDF-1.4"), "application/pdf", "info.pdf");
+  ok("un PDF no sirve de bienvenida → 422", pdf.res.status === 422, JSON.stringify(pdf.json));
+  const grande = await subirCrudo(Buffer.alloc(17 * 1024 * 1024), "video/mp4", "largo.mp4");
+  ok("un video de 17 MB → 413 antes de guardarlo", grande.res.status === 413);
+
+  const VIDEO = Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32]);
+  const subida = await subirCrudo(VIDEO, "video/mp4", "Filtro.mp4");
+  ok(
+    "el dueño sube el video en el Agente",
+    subida.res.ok && subida.json?.welcomeMedia?.kind === "video",
+    JSON.stringify(subida.json)
+  );
+  const assetId = subida.json?.welcomeMedia?.id;
+  const caption = "¿Cuentas con un presupuesto de S/ 88,000?";
+  const texto = await api("/api/agent/welcome-media", {
+    method: "PATCH",
+    body: JSON.stringify({ caption }),
+  });
+  ok("y le pone el texto que lo acompaña", texto.json?.welcomeMedia?.caption === caption);
+
+  const perfil = await bot("/api/bot/profile");
+  ok(
+    "el perfil del cerebro anuncia el video (tipo y texto)",
+    perfil.json?.welcomeMedia?.kind === "video" && perfil.json?.welcomeMedia?.caption === caption,
+    JSON.stringify(perfil.json?.welcomeMedia)
+  );
+
+  const antes = ((await api("/api/dev/wa-mock/outbox")).json?.outbox ?? []).length;
+  const envio = await bot("/api/bot/messages/bienvenida", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: convId }),
+  });
+  ok("POST /api/bot/messages/bienvenida → 200", envio.res.ok, JSON.stringify(envio.json));
+  const outbox = (await api("/api/dev/wa-mock/outbox")).json?.outbox ?? [];
+  const salida = outbox[outbox.length - 1];
+  ok(
+    "salió por WhatsApp como video con su texto",
+    outbox.length === antes + 1 &&
+      salida?.type === "video" &&
+      JSON.stringify(salida?.body).includes("88,000"),
+    JSON.stringify(salida)
+  );
+  const segundo = await bot("/api/bot/messages/bienvenida", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: convId }),
+  });
+  const hilo = (await api(`/api/conversations/${convId}/messages`)).json?.messages ?? [];
+  const enviados = hilo.filter(
+    (m) => m.id === envio.json?.messageId || m.id === segundo.json?.messageId
+  );
+  ok(
+    "en el hilo, marcado como IA y apuntando al MISMO archivo (sin copias)",
+    enviados.length === 2 &&
+      enviados.every(
+        (m) => m.type === "video" && m.origin === "ai" && m.aiGenerated && m.media?.assetId === assetId
+      ),
+    JSON.stringify(enviados.map((m) => ({ type: m.type, origin: m.origin, asset: m.media?.assetId })))
+  );
+
+  const reemplazo = await subirCrudo(VIDEO, "video/mp4", "Filtro-v2.mp4");
+  ok(
+    "cambiar el video conserva el texto",
+    reemplazo.json?.welcomeMedia?.caption === caption && reemplazo.json?.welcomeMedia?.id !== assetId
+  );
+  const viejo = await fetch(`${BASE}/api/media/${assetId}`, { headers: { cookie, origin: BASE } });
+  ok("el video viejo sigue visible en los hilos que ya lo recibieron", viejo.ok);
+
+  await api("/api/agent/welcome-media", { method: "DELETE" });
+  const quitado = await bot("/api/bot/messages/bienvenida", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: convId }),
+  });
+  ok("al quitarlo, el cerebro ya no puede mandarlo (404)", quitado.res.status === 404);
+  ok(
+    "y el perfil vuelve a welcomeMedia=null",
+    (await bot("/api/bot/profile")).json?.welcomeMedia === null
+  );
+}
+
 async function respuestasDeBotonChecks() {
   console.log("\n== #78: una respuesta de botón entra como texto del cliente ==");
   // Contacto nuevo por corrida: la sección cuenta entrantes y espera la

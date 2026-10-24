@@ -695,6 +695,16 @@ export const agentProfile = pgTable(
      * todas: lo que tiene una instalación que actualiza.
      */
     tools: jsonb("tools").$type<string[]>(),
+    /**
+     * Video (o imagen) de bienvenida: el cerebro lo manda una sola vez, en
+     * su primera respuesta a cada contacto (`POST /api/bot/messages/bienvenida`).
+     * Un solo asset compartido por todos los envíos: no se copia por lead. El
+     * texto que lo acompaña es el `caption` del propio asset.
+     */
+    welcomeMediaAssetId: text("welcome_media_asset_id").references(
+      () => mediaAsset.id,
+      { onDelete: "set null" }
+    ),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

@@ -6,7 +6,7 @@ import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { BrainStatusCard } from "@/components/agent/brain-status-card";
 import { externalDown, type BrainStatusDto } from "@/lib/brain-status";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -217,6 +217,7 @@ export function AgentClient() {
           onPreset={() => void cargarPreset()}
         />
         <ProfileSection profile={profile} onSave={saveProfile} />
+        <BienvenidaSection />
         <KbSection entries={entries} kbSize={kbSize} onChanged={() => void refetch()} />
       </div>
     </div>
@@ -364,6 +365,172 @@ function ProfileSection({
         >
           Guardar comportamiento
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+type WelcomeMedia = {
+  id: string;
+  kind: "video" | "image";
+  mimeType: string | null;
+  fileName: string | null;
+  fileSize: number | null;
+  caption: string | null;
+  url: string;
+};
+
+/**
+ * Video de bienvenida: el agente conectado lo manda una sola vez, en su
+ * primera respuesta a cada contacto, con el texto de abajo. El archivo vive
+ * en el CRM (`/api/agent/welcome-media`); el agente solo pide enviarlo.
+ */
+function BienvenidaSection() {
+  const [media, setMedia] = useState<WelcomeMedia | null>(null);
+  const [caption, setCaption] = useState("");
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [guardado, setGuardado] = useState(false);
+
+  const aplicar = useCallback((wm: WelcomeMedia | null) => {
+    setMedia(wm);
+    setCaption(wm?.caption ?? "");
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/agent/welcome-media")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { welcomeMedia: WelcomeMedia | null } | null) => {
+        if (d) aplicar(d.welcomeMedia);
+      })
+      .catch(() => null);
+  }, [aplicar]);
+
+  async function subir(file: File) {
+    setError(null);
+    setSubiendo(true);
+    try {
+      const res = await fetch("/api/agent/welcome-media", {
+        method: "PUT",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-file-name": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(d?.error?.message ?? "No se pudo subir el archivo");
+        return;
+      }
+      aplicar(d.welcomeMedia);
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
+  async function guardarTexto() {
+    setError(null);
+    const res = await fetch("/api/agent/welcome-media", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ caption: caption.trim() || null }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(d?.error?.message ?? "No se pudo guardar el texto");
+      return;
+    }
+    aplicar(d.welcomeMedia);
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 2000);
+  }
+
+  async function quitar() {
+    setError(null);
+    const res = await fetch("/api/agent/welcome-media", { method: "DELETE" });
+    if (res.ok) aplicar(null);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Video de bienvenida</CardTitle>
+        <CardDescription>
+          El agente lo envía una sola vez, en su primera respuesta a cada
+          cliente nuevo. Video MP4 de hasta 16 MB o imagen JPG/PNG de hasta 5 MB.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {media ? (
+          <div className="space-y-2">
+            {media.kind === "video" ? (
+              <video
+                src={media.url}
+                controls
+                preload="metadata"
+                className="max-h-80 rounded-md border border-border"
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={media.url}
+                alt="Imagen de bienvenida"
+                className="max-h-80 rounded-md border border-border"
+              />
+            )}
+            <p className="text-xs text-muted-foreground">
+              {media.fileName ?? "Archivo"}
+              {media.fileSize ? ` · ${(media.fileSize / (1024 * 1024)).toFixed(1)} MB` : ""}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Sin video: el agente contesta solo con texto.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Label
+            htmlFor="welcome-file"
+            className={`${buttonVariants({ variant: "outline", size: "sm" })} cursor-pointer`}
+          >
+            {subiendo ? "Subiendo…" : media ? "Cambiar archivo" : "Subir video"}
+          </Label>
+          <input
+            id="welcome-file"
+            type="file"
+            accept="video/mp4,video/3gpp,image/jpeg,image/png"
+            className="sr-only"
+            disabled={subiendo}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void subir(file);
+            }}
+          />
+          {media && (
+            <Button variant="ghost" size="sm" onClick={() => void quitar()}>
+              <Trash2 className="size-4" /> Quitar
+            </Button>
+          )}
+        </div>
+        {media && (
+          <div className="space-y-1.5">
+            <Label htmlFor="welcome-caption">Texto que acompaña al video</Label>
+            <Textarea
+              id="welcome-caption"
+              rows={3}
+              maxLength={1024}
+              placeholder="p. ej. ¿Cuentas con un presupuesto de S/ 88,000? Cuéntame y coordinamos una llamada."
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+            />
+            <Button size="sm" onClick={() => void guardarTexto()}>
+              {guardado ? "Guardado" : "Guardar texto"}
+            </Button>
+          </div>
+        )}
+        {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
     </Card>
   );

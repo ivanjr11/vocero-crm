@@ -208,6 +208,14 @@ export async function eliminarConversacion(
                 .select({ uno: sql`1` })
                 .from(schema.adAttribution)
                 .where(eq(schema.adAttribution.imageAssetId, schema.mediaAsset.id))
+            ),
+            // El video de bienvenida lo comparten todos los hilos que lo
+            // recibieron: sigue en el Agente aunque se borre este.
+            notExists(
+              tx
+                .select({ uno: sql`1` })
+                .from(schema.agentProfile)
+                .where(eq(schema.agentProfile.welcomeMediaAssetId, schema.mediaAsset.id))
             )
           )
         )

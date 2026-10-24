@@ -24,7 +24,19 @@ type KbEntry = typeof schema.kbEntry.$inferSelect;
  */
 export type BotLlm = { path: string; model: string } | null;
 
-export function serializeBotProfile(profile: AgentProfile, kb: KbEntry[], llm: BotLlm = null) {
+/**
+ * Video de bienvenida — Qué manda `POST /api/bot/messages/bienvenida` si el
+ * cerebro lo pide: el tipo y su texto. `null` sin nada configurado. Aditivo:
+ * un cerebro que no lo conozca simplemente no lo manda.
+ */
+export type BotWelcomeMedia = { kind: string; caption: string | null } | null;
+
+export function serializeBotProfile(
+  profile: AgentProfile,
+  kb: KbEntry[],
+  llm: BotLlm = null,
+  welcomeMedia: BotWelcomeMedia = null
+) {
   return {
     profile: {
       name: profile.name,
@@ -38,5 +50,6 @@ export function serializeBotProfile(profile: AgentProfile, kb: KbEntry[], llm: B
     kb: renderKb(kb),
     resources: [] as { label: string; url: string }[],
     llm,
+    welcomeMedia,
   };
 }

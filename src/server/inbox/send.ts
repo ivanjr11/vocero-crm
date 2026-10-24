@@ -50,6 +50,7 @@ import { isChannelEnabled } from "@/server/channels/enabled";
 import { serializeMessage } from "@/server/inbox/ingest";
 import { conCita, type CitaEncontrada } from "@/server/inbox/quotes";
 import {
+  readMediaFile,
   saveMediaFile,
   uploadGraphMedia,
   validateOutgoing,
@@ -657,6 +658,110 @@ export async function sendMediaMessage(input: {
       mediaAssetId: assetId,
       media: asset,
       cita,
+    });
+    throw sendErr;
+  }
+}
+
+/**
+ * Video de bienvenida — Envía un asset que YA vive en el CRM (el de
+ * bienvenida del Agente) sin copiarlo: todos los mensajes apuntan al mismo
+ * `media_asset`, así mil leads no son mil copias del mismo video en disco.
+ * Lo usa el cerebro (`aiGenerated`), con las mismas guardas que el resto
+ * (sandbox, ventana, canal sin adjuntos). Si Graph falla, el mensaje queda
+ * `failed` en el hilo, igual que un adjunto del compositor.
+ */
+export async function sendStoredMedia(input: {
+  conversationId: string;
+  organizationId: string;
+  assetId: string;
+  aiGenerated?: boolean;
+}): Promise<SendResult> {
+  const aiGenerated = input.aiGenerated ?? false;
+  const target = await prepareSend(input.conversationId, input.organizationId, aiGenerated);
+  const { credentials } = target;
+  const sendCaps = capabilitiesFor(target.conversation.channel);
+  if (!sendCaps.outboundMedia) {
+    throw new SendError(
+      "meta_error",
+      `Todavía no se pueden enviar adjuntos por ${sendCaps.label}; manda el texto`
+    );
+  }
+
+  const db = getDb();
+  const assets = await db
+    .select()
+    .from(schema.mediaAsset)
+    .where(
+      and(
+        eq(schema.mediaAsset.organizationId, input.organizationId),
+        eq(schema.mediaAsset.id, input.assetId)
+      )
+    )
+    .limit(1);
+  const asset = assets[0];
+  if (!asset || !asset.mimeType || asset.fetchStatus !== "available") {
+    throw new SendError("upload_failed", "El archivo a enviar ya no está disponible");
+  }
+  const kind = asset.kind as "image" | "video" | "audio" | "document";
+  const origin = aiGenerated ? "ai" : "operator";
+
+  try {
+    const data = await readMediaFile(input.organizationId, asset.id);
+    const waMediaId = await uploadGraphMedia(credentials!, {
+      data,
+      mimeType: asset.mimeType,
+      fileName: asset.fileName ?? undefined,
+    });
+    const mediaPayload: Record<string, unknown> = { id: waMediaId };
+    if (asset.caption && kind !== "audio") mediaPayload.caption = asset.caption;
+    if (kind === "document" && asset.fileName) {
+      mediaPayload.filename = asset.fileName;
+    }
+    const waMessageId = await callGraphSend(credentials!, {
+      messaging_product: "whatsapp",
+      ...target.destinatario,
+      type: kind,
+      [kind]: mediaPayload,
+    });
+    const messageId = await persistOutbound({
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      waMessageId,
+      type: kind,
+      text: null,
+      status: "pending",
+      aiGenerated,
+      origin,
+      mediaAssetId: asset.id,
+      media: asset,
+    });
+    return { messageId };
+  } catch (err) {
+    let sendErr: SendError;
+    if (err instanceof SendError) {
+      sendErr = err;
+    } else if (err instanceof MetaApiError && err.isAuthError) {
+      await markReconnectRequired(input.organizationId);
+      sendErr = new SendError(
+        "reconnect_required",
+        "El token de WhatsApp expiró: reconecta el número en Configuración"
+      );
+    } else {
+      sendErr = new SendError("upload_failed", "No se pudo subir el adjunto a WhatsApp");
+    }
+    sendErr.messageId = await persistOutbound({
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      waMessageId: null,
+      type: kind,
+      text: null,
+      status: "failed",
+      error: sendErr.message,
+      aiGenerated,
+      origin,
+      mediaAssetId: asset.id,
+      media: asset,
     });
     throw sendErr;
   }
