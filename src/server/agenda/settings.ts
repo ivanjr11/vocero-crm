@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 import { scoped } from "@/lib/db/tenant";
@@ -43,7 +44,17 @@ export type CalendarSettings = {
   connector: ConnectorId;
   /** Sala fija del conector `enlace-fijo`; null ⇒ citas sin link. */
   meetingLink: string | null;
+  /** Minutos antes de la cita para recordárselo al cliente; 0 = apagado. */
+  reminderMinutes: number;
+  /** Texto del recordatorio (`{nombre}`, `{hora}`, `{fecha}`); null = el de fábrica. */
+  reminderText: string | null;
+  /** Plantilla aprobada para cuando la ventana de 24 h cerró; null = no se manda. */
+  reminderTemplateId: string | null;
 };
+
+/** El recordatorio que sale si el negocio no escribió el suyo. */
+export const DEFAULT_REMINDER_TEXT =
+  "Hola {nombre} 👋 Te recuerdo nuestra llamada de hoy a las {hora}. ¡Hablamos en un momento!";
 
 /** Lo que ve una instancia recién encendida: útil sin configurar nada. */
 export const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
@@ -55,6 +66,9 @@ export const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
   timezone: DEFAULT_TIMEZONE,
   connector: DEFAULT_CONNECTOR,
   meetingLink: null,
+  reminderMinutes: 0,
+  reminderText: null,
+  reminderTemplateId: null,
 };
 
 export const LIMITS = {
@@ -62,6 +76,8 @@ export const LIMITS = {
   bufferMinutes: { min: 0, max: 120 },
   minNoticeHours: { min: 0, max: 72 },
   maxDaysAhead: { min: 1, max: 60 },
+  reminderMinutes: { min: 0, max: 1440 },
+  reminderText: { max: 1000 },
 } as const;
 
 export async function getSettings(
@@ -89,6 +105,9 @@ export async function getSettings(
     // puede dejar la agenda inservible: se degrada al soberano.
     connector: isConnectorId(row.connector) ? row.connector : DEFAULT_CONNECTOR,
     meetingLink: row.meetingLink,
+    reminderMinutes: row.reminderMinutes,
+    reminderText: row.reminderText,
+    reminderTemplateId: row.reminderTemplateId,
   };
 }
 
@@ -158,9 +177,37 @@ export async function upsertSettings(
     meetingLink: normalizeLink(
       input.meetingLink !== undefined ? input.meetingLink : current.meetingLink
     ),
+    reminderMinutes: clampInt(
+      input.reminderMinutes ?? current.reminderMinutes,
+      LIMITS.reminderMinutes.min,
+      LIMITS.reminderMinutes.max
+    ),
+    reminderText: normalizeReminderText(
+      input.reminderText !== undefined ? input.reminderText : current.reminderText
+    ),
+    reminderTemplateId:
+      input.reminderTemplateId !== undefined
+        ? input.reminderTemplateId || null
+        : current.reminderTemplateId,
   };
 
   const db = getDb();
+  if (next.reminderTemplateId && next.reminderTemplateId !== current.reminderTemplateId) {
+    const plantillas = await db
+      .select({ id: schema.template.id })
+      .from(schema.template)
+      .where(
+        scoped(
+          schema.template.organizationId,
+          organizationId,
+          eq(schema.template.id, next.reminderTemplateId)
+        )
+      )
+      .limit(1);
+    if (!plantillas[0]) {
+      throw new CalendarSettingsError("La plantilla del recordatorio no existe");
+    }
+  }
   const values = {
     weeklyHours: next.weeklyHours,
     slotMinutes: next.slotMinutes,
@@ -170,6 +217,9 @@ export async function upsertSettings(
     timezone: next.timezone,
     connector: next.connector,
     meetingLink: next.meetingLink,
+    reminderMinutes: next.reminderMinutes,
+    reminderText: next.reminderText,
+    reminderTemplateId: next.reminderTemplateId,
   };
   await db
     .insert(schema.calendarSettings)
@@ -215,4 +265,10 @@ function normalizeLink(link: string | null | undefined): string | null {
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+/** Vacío = el de fábrica; recortado al tope para que quepa en un mensaje. */
+function normalizeReminderText(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  return v ? v.slice(0, LIMITS.reminderText.max) : null;
 }

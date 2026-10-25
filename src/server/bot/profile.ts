@@ -31,11 +31,15 @@ export type BotLlm = { path: string; model: string } | null;
  */
 export type BotWelcomeMedia = { kind: string; caption: string | null } | null;
 
+/** El CRM le recuerda la cita al cliente `minutesBefore` antes (Ajustes → Agenda). */
+export type BotAppointmentReminder = { minutesBefore: number } | null;
+
 export function serializeBotProfile(
   profile: AgentProfile,
   kb: KbEntry[],
   llm: BotLlm = null,
-  welcomeMedia: BotWelcomeMedia = null
+  welcomeMedia: BotWelcomeMedia = null,
+  appointmentReminder: BotAppointmentReminder = null
 ) {
   return {
     profile: {
@@ -51,5 +55,6 @@ export function serializeBotProfile(
     resources: [] as { label: string; url: string }[],
     llm,
     welcomeMedia,
+    appointmentReminder,
   };
 }

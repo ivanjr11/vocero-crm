@@ -33,6 +33,9 @@ const SETTINGS: CalendarSettings = {
   timezone: "America/Mexico_City",
   connector: "enlace-fijo",
   meetingLink: null,
+  reminderMinutes: 0,
+  reminderText: null,
+  reminderTemplateId: null,
 };
 
 // Lunes 21 sep 2026, 09:00 CDMX.

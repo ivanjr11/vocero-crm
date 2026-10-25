@@ -17,6 +17,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { bookingTitle, bookingTone, canRetrySync, statusLabel, type Booking } from "./booking-look";
 
+const REMINDER_LABEL: Record<NonNullable<Booking["reminderStatus"]>, string> = {
+  enviado: "Enviado por WhatsApp",
+  plantilla: "Enviado con la plantilla (la ventana de 24 h estaba cerrada)",
+  omitido: "No se envió",
+  fallido: "Falló el envío",
+};
+
 /**
  * 215 — La cita, abierta, sin salir del calendario. Tiene TODO lo que tenía la
  * tarjeta de la lista de antes (acciones, enlace, notas y el reintento del
@@ -199,6 +206,14 @@ export function BookingDrawer({
                   <p className="whitespace-pre-wrap text-sm text-text-2">{b.notes}</p>
                 </div>
               )}
+            </section>
+          )}
+
+          {b.reminderStatus && (
+            <section className="border-b p-4">
+              <p className="kicker mb-1">Recordatorio al cliente</p>
+              <p className="text-sm text-text-2">{REMINDER_LABEL[b.reminderStatus]}</p>
+              {b.reminderError && <p className="mt-1 text-xs text-text-3">{b.reminderError}</p>}
             </section>
           )}
 

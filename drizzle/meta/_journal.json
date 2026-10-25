@@ -190,6 +190,13 @@
       "when": 1792878630361,
       "tag": "0026_video_bienvenida",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792896144411,
+      "tag": "0027_recordatorio_cita",
+      "breakpoints": true
     }
   ]
 }

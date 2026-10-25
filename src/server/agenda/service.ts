@@ -313,7 +313,14 @@ export async function rescheduleBooking(input: {
   try {
     const updated = await db
       .update(schema.booking)
-      .set({ scheduledAt: new Date(slot.startUtc), updatedAt: new Date() })
+      // Otra hora, otro recordatorio: el de la hora vieja ya no cuenta.
+      .set({
+        scheduledAt: new Date(slot.startUtc),
+        reminderAt: null,
+        reminderStatus: null,
+        reminderError: null,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.booking.id, booking.id))
       .returning();
     next = updated[0]!;

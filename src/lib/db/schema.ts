@@ -813,6 +813,20 @@ export const calendarSettings = pgTable(
     connector: text("connector").notNull().default("enlace-fijo"),
     /** Sala fija del conector `enlace-fijo`; null ⇒ citas sin link. */
     meetingLink: text("meeting_link"),
+    /**
+     * Recordatorio al cliente: cuántos minutos antes de la cita se le escribe.
+     * 0 = apagado (el default: nada sale sin que el negocio lo pida).
+     */
+    reminderMinutes: integer("reminder_minutes").notNull().default(0),
+    /** Texto del recordatorio, con `{nombre}`, `{hora}` y `{fecha}`. */
+    reminderText: text("reminder_text"),
+    /**
+     * Plantilla aprobada para cuando la ventana de 24 h ya cerró: fuera de ella
+     * WhatsApp solo deja mandar plantillas. Null ⇒ sin ventana, no se manda.
+     */
+    reminderTemplateId: text("reminder_template_id").references(() => template.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -873,6 +887,15 @@ export const booking = pgTable(
     /** Conversación del Laboratorio: jamás llama a un conector real. */
     isTest: boolean("is_test").notNull().default(false),
     notes: text("notes"),
+    /**
+     * Recordatorio al cliente. `reminderAt` se toma ANTES de enviar (la marca
+     * es la reserva: dos barridos no mandan dos); reprogramar lo vacía.
+     */
+    reminderAt: timestamp("reminder_at"),
+    reminderStatus: text("reminder_status", {
+      enum: ["enviado", "plantilla", "omitido", "fallido"],
+    }),
+    reminderError: text("reminder_error"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

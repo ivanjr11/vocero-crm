@@ -96,6 +96,7 @@ describe("serializeBotProfile", () => {
       resources: [],
       llm: null,
       welcomeMedia: null,
+      appointmentReminder: null,
     });
   });
 

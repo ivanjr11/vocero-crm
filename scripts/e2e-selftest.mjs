@@ -2651,6 +2651,7 @@ async function agendaChecks() {
   }
 
   await huecosPorFechaChecks();
+  await recordatorioChecks();
 
   // El sandbox del Laboratorio (una cita de prueba jamás llega a un conector)
   // NO se verifica aquí: las conversaciones del Laboratorio no son alcanzables
@@ -2659,6 +2660,132 @@ async function agendaChecks() {
   // `tests/unit/agenda-sandbox.test.ts`, que afirma lo que de verdad importa:
   // que el conector no se llama, ni al crear, ni al reprogramar, ni al
   // cancelar.
+}
+
+/* ============================================================
+ * Recordatorio de la cita: el CRM le escribe al cliente N minutos antes.
+ *
+ * El barrido corre cada minuto con el reloj real; aquí se le pasa el reloj
+ * por `/api/dev/recordatorios` para no esperar media hora. Lead propio.
+ * ============================================================ */
+async function recordatorioChecks() {
+  console.log("\n== Recordatorio de la cita ==");
+  const TEXTO = "Hola {nombre}, te recuerdo nuestra llamada a las {hora} 📞";
+  const conf = await api("/api/calendar/settings", {
+    method: "PUT",
+    body: JSON.stringify({ reminderMinutes: 30, reminderText: TEXTO }),
+  });
+  ok(
+    "se guardan los minutos y el texto del recordatorio",
+    conf.res.ok && conf.json?.settings?.reminderMinutes === 30 && conf.json?.settings?.reminderText === TEXTO,
+    `status=${conf.res.status} ${JSON.stringify(conf.json?.settings ?? conf.json)}`
+  );
+  const malo = await api("/api/calendar/settings", {
+    method: "PUT",
+    body: JSON.stringify({ reminderMinutes: 5000 }),
+  });
+  // Como los demás números de la agenda: se acota, no se rechaza.
+  ok(
+    "unos minutos fuera de rango se acotan a un día",
+    malo.json?.settings?.reminderMinutes === 1440,
+    `status=${malo.res.status} min=${malo.json?.settings?.reminderMinutes}`
+  );
+  await api("/api/calendar/settings", {
+    method: "PUT",
+    body: JSON.stringify({ reminderMinutes: 30 }),
+  });
+  const plantillaAjena = await api("/api/calendar/settings", {
+    method: "PUT",
+    body: JSON.stringify({ reminderTemplateId: "tpl_no_existe" }),
+  });
+  ok(
+    "una plantilla que no es del negocio se rechaza",
+    plantillaAjena.res.status >= 400 && plantillaAjena.res.status < 500,
+    `status=${plantillaAjena.res.status}`
+  );
+
+  const perfil = await bot("/api/bot/profile");
+  ok(
+    "el perfil del bot anuncia el recordatorio (para que el agente no lo niegue)",
+    perfil.json?.appointmentReminder?.minutesBefore === 30,
+    JSON.stringify(perfil.json?.appointmentReminder)
+  );
+
+  const SUF = Date.now().toString().slice(-6);
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: `5214628${SUF}`,
+      name: "Rosa Quispe",
+      text: "quiero la llamada",
+      waMessageId: `wamid.e2e.rec.${SUF}.1`,
+    }),
+  });
+  let conv = null;
+  await hasta(async () => {
+    const cs = (await api("/api/conversations")).json?.conversations ?? [];
+    conv = cs.find((c) => c.contact.phone === `524628${SUF}`) ?? null;
+    return Boolean(conv);
+  });
+  ok("conversación del lead del recordatorio", Boolean(conv));
+  if (!conv) return;
+
+  const oferta = await bot(`/api/bot/availability?conversationId=${conv.id}&limit=12&perDay=3&days=5`);
+  // Una hora con más de media hora por delante: la reservada YA dentro de la
+  // ventana no se recuerda (el cliente acaba de agendarla).
+  const hueco = (oferta.json?.slots ?? []).find((s) => Date.parse(s.startUtc) > Date.now() + 45 * 60_000);
+  ok("hay un hueco con más de 45 min por delante", Boolean(hueco));
+  if (!hueco) return;
+  const cita = await bot("/api/bot/bookings", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: conv.id, startUtc: hueco.startUtc }),
+  });
+  ok("se agenda la llamada", cita.res.status === 201, `status=${cita.res.status}`);
+  if (cita.res.status !== 201) return;
+  const inicio = Date.parse(hueco.startUtc);
+  const aEste = (o) => o.to === `524628${SUF}` || o.to === `5214628${SUF}`;
+  const recordatorios = async () =>
+    ((await api("/api/dev/wa-mock/outbox")).json?.outbox ?? []).filter(
+      (o) => aEste(o) && JSON.stringify(o.body).includes("te recuerdo nuestra llamada")
+    );
+
+  await api("/api/dev/recordatorios", {
+    method: "POST",
+    body: JSON.stringify({ now: new Date(inicio - 40 * 60_000).toISOString() }),
+  });
+  ok("40 min antes todavía no sale", (await recordatorios()).length === 0);
+
+  const pasada = await api("/api/dev/recordatorios", {
+    method: "POST",
+    body: JSON.stringify({ now: new Date(inicio - 25 * 60_000).toISOString() }),
+  });
+  ok("25 min antes el barrido lo atiende", pasada.json?.atendidas >= 1, JSON.stringify(pasada.json));
+  const salidos = await recordatorios();
+  ok("le llega al cliente por WhatsApp", salidos.length === 1, `n=${salidos.length}`);
+  ok(
+    "con su nombre y la hora de la cita",
+    JSON.stringify(salidos[0]?.body ?? "").includes("Hola Rosa,") &&
+      JSON.stringify(salidos[0]?.body ?? "").includes(hueco.time),
+    JSON.stringify(salidos[0]?.body)
+  );
+
+  await api("/api/dev/recordatorios", {
+    method: "POST",
+    body: JSON.stringify({ now: new Date(inicio - 20 * 60_000).toISOString() }),
+  });
+  ok("el siguiente barrido no lo repite", (await recordatorios()).length === 1);
+
+  const lista = (await api("/api/bookings")).json?.bookings ?? [];
+  const fila = lista.find((b) => b.id === cita.json?.bookingId);
+  ok("la cita queda marcada como recordada", fila?.reminderStatus === "enviado", JSON.stringify(fila));
+
+  await api("/api/calendar/settings", {
+    method: "PUT",
+    body: JSON.stringify({ reminderMinutes: 0, reminderText: null }),
+  });
+  const apagado = await bot("/api/bot/profile");
+  ok("con el recordatorio en 0 el perfil lo dice (null)", apagado.json?.appointmentReminder === null);
 }
 
 /* ============================================================
