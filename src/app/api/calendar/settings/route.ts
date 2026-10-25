@@ -46,6 +46,9 @@ const putSchema = z.object({
     })
     .optional(),
   meetingLink: z.string().nullish(),
+  reminderMinutes: z.number().optional(),
+  reminderText: z.string().max(1000).nullish(),
+  reminderTemplateId: z.string().nullish(),
 });
 
 /**
@@ -65,6 +68,12 @@ export const PUT = withAuth(async (session, req: Request) => {
       // `undefined` = no lo tocaron; `null` = lo vaciaron a propósito.
       meetingLink:
         body.data.meetingLink === undefined ? undefined : body.data.meetingLink,
+      reminderText:
+        body.data.reminderText === undefined ? undefined : body.data.reminderText,
+      reminderTemplateId:
+        body.data.reminderTemplateId === undefined
+          ? undefined
+          : body.data.reminderTemplateId,
     });
     return Response.json({ settings });
   } catch (err) {

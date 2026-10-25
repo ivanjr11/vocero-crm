@@ -10,6 +10,7 @@ export async function register(): Promise<void> {
       cleanupOrphanRuns,
       encryptLegacySecrets,
       resumeDispatch,
+      resumeRecordatorios,
       resumeWebhooks,
     } = await import("./instrumentation-node");
     await checkMediaDir();
@@ -17,5 +18,6 @@ export async function register(): Promise<void> {
     await encryptLegacySecrets();
     resumeDispatch();
     resumeWebhooks();
+    resumeRecordatorios();
   }
 }

@@ -1,5 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
+import { agendaEnabled } from "@/server/agenda/flag";
+import { barridoRecordatorios, iniciarRecordatorios } from "@/server/agenda/recordatorios";
 import { mediaDirStatus } from "@/server/media-dir";
 import { leerConfigDespacho } from "@/server/brains/config";
 import { iniciarWorker, tanda } from "@/server/dispatch/worker";
@@ -122,4 +124,14 @@ export function resumeDispatch(): void {
 export function resumeWebhooks(): void {
   iniciarBarrido();
   void barrido();
+}
+
+/**
+ * Recordatorio de la cita: barre cada minuto las citas que entran en la
+ * ventana del recordatorio (Ajustes → Agenda). Solo con la agenda encendida.
+ */
+export function resumeRecordatorios(): void {
+  if (!agendaEnabled()) return;
+  iniciarRecordatorios();
+  void barridoRecordatorios();
 }

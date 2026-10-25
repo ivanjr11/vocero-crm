@@ -37,7 +37,15 @@ type Settings = {
   timezone: string;
   connector: ConnectorId;
   meetingLink: string | null;
+  reminderMinutes: number;
+  reminderText: string | null;
+  reminderTemplateId: string | null;
 };
+
+type TemplateOption = { id: string; name: string; language: string; status: string };
+
+const REMINDER_PLACEHOLDER =
+  "Hola {nombre} 👋 Te recuerdo nuestra llamada de hoy a las {hora}. ¡Hablamos en un momento!";
 
 const DAYS: { key: DayKey; label: string }[] = [
   { key: "mon", label: "Lunes" },
@@ -57,13 +65,19 @@ export function AgendaClient() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
 
   useEffect(() => {
     void (async () => {
-      const [cfg, avail] = await Promise.all([
+      const [cfg, avail, tpl] = await Promise.all([
         fetch("/api/calendar/settings").catch(() => null),
         fetch("/api/calendar/availability").catch(() => null),
+        fetch("/api/templates").catch(() => null),
       ]);
+      if (tpl?.ok) {
+        const data = (await tpl.json()) as { templates: TemplateOption[] };
+        setTemplates(data.templates.filter((t) => t.status === "approved"));
+      }
       if (cfg?.ok) {
         const data = (await cfg.json()) as { settings: Settings };
         setSettings(data.settings);
@@ -144,6 +158,9 @@ export function AgendaClient() {
         meetingLink: settings.meetingLink?.trim()
           ? settings.meetingLink.trim()
           : null,
+        reminderMinutes: settings.reminderMinutes,
+        reminderText: settings.reminderText?.trim() || null,
+        reminderTemplateId: settings.reminderTemplateId,
       }),
     }).catch(() => null);
     setSaving(false);
@@ -364,6 +381,64 @@ export function AgendaClient() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recordatorio al cliente</CardTitle>
+          <CardDescription>
+            Un mensaje de WhatsApp antes de la cita. Si el cliente no escribió
+            en las últimas 24 horas, WhatsApp solo deja mandar una plantilla
+            aprobada: elígela abajo o el recordatorio no sale.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="reminder-min">Minutos antes (0 = sin recordatorio)</Label>
+            <Input
+              id="reminder-min"
+              type="number"
+              min={0}
+              max={1440}
+              value={settings.reminderMinutes}
+              onChange={(e) => patch({ reminderMinutes: Number(e.target.value) })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reminder-text">Mensaje</Label>
+            <textarea
+              id="reminder-text"
+              rows={3}
+              maxLength={1000}
+              className="w-full rounded-sm border border-border bg-transparent px-3 py-2 text-sm"
+              value={settings.reminderText ?? ""}
+              onChange={(e) => patch({ reminderText: e.target.value })}
+              placeholder={REMINDER_PLACEHOLDER}
+            />
+            <p className="text-xs text-text-3">
+              Usa {"{nombre}"}, {"{hora}"} y {"{fecha}"}. Vacío, sale el de ejemplo.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reminder-tpl">Plantilla fuera de las 24 horas</Label>
+            <select
+              id="reminder-tpl"
+              className="w-full rounded-sm border border-border bg-transparent px-3 py-2 text-sm"
+              value={settings.reminderTemplateId ?? ""}
+              onChange={(e) => patch({ reminderTemplateId: e.target.value || null })}
+            >
+              <option value="">Ninguna</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.language})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-text-3">
+              Solo plantillas aprobadas. Sus variables: {"{{1}}"} = nombre, {"{{2}}"} = hora.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={saving}>

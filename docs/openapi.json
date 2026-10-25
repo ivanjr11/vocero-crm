@@ -287,6 +287,13 @@
               { "type": "object", "required": ["kind", "caption"], "properties": { "kind": { "type": "string", "examples": ["video"] }, "caption": { "type": ["string", "null"] } } },
               { "type": "null" }
             ]
+          },
+          "appointmentReminder": {
+            "description": "Recordatorio de la cita: el CRM le escribe al cliente `minutesBefore` minutos antes de cada cita agendada (Ajustes → Agenda). El cerebro no tiene que mandar nada: solo saber que existe para no negarlo. `null` sin agenda o con el recordatorio apagado.",
+            "oneOf": [
+              { "type": "object", "required": ["minutesBefore"], "properties": { "minutesBefore": { "type": "integer", "examples": [30] } } },
+              { "type": "null" }
+            ]
           }
         }
       },
