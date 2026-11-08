@@ -7,6 +7,7 @@ import { ATAJOS, esAyuda, esBarraDeComandos, esCampoDeTexto } from "@/lib/atajos
 import { urlDeConversacion } from "@/lib/avisos-sistema";
 import { appNavGroups, SETTINGS_ITEM, type NavItem } from "@/lib/nav";
 import { matchesQuery } from "@/lib/search";
+import { listaVigente } from "@/lib/lista-compartida";
 import { cn } from "@/lib/utils";
 import { abrirConversacionDeAviso } from "./avisos-de-mensajes";
 
@@ -82,6 +83,12 @@ function BarraDeComandos({
   const listaRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
+    // 064 — Con la Bandeja abierta, su lista ya está al día: no se pide otra.
+    const vigente = listaVigente();
+    if (vigente) {
+      setConversaciones(vigente);
+      return;
+    }
     let vivo = true;
     void fetch("/api/conversations")
       .then((r) => (r.ok ? r.json() : null))

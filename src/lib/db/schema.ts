@@ -512,6 +512,12 @@ export const metaCredentials = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     wabaId: text("waba_id").notNull(),
+    /**
+     * 065 — La Cuenta de mensajes del split de 2026: donde viven las
+     * plantillas y el método de pago. `waba_id` sigue siendo la Cuenta de
+     * WhatsApp (la del número). Nula = instancia de una sola ID, como antes.
+     */
+    messagingAccountId: text("messaging_account_id"),
     phoneNumberId: text("phone_number_id").notNull(),
     displayPhoneNumber: text("display_phone_number"),
     verifiedName: text("verified_name"),

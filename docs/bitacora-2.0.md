@@ -882,6 +882,39 @@ Coolify. Messenger y TikTok, solo con simuladores.
 Que Kevin revise y mergee #125 y nea-agent#43; el arreglo del seguimiento y
 la lista de permitidos; luego #91 (Laboratorio por contrato).
 
+## 2026-10-20 — 032: el seguimiento y el reintento respetan `ALLOWED_WA_IDS`
+
+PR: [nea-agent#44](https://github.com/kevinrivm/nea-agent/pull/44), rama
+`fix/032-seguimiento-permitidos`, sobre `main` (ya con la 031 mergeada).
+Spec de carril ligero en
+`specs/032-seguimiento-permitidos/spec.md` (rama
+`docs/032-seguimiento-permitidos` de este repo), escrita antes del código.
+**Abierto, sin mergear.**
+
+### Qué quedó
+
+- `Settings.identidad_permitida`: la única forma de leer la lista; la usan el
+  turno, el seguimiento de 4 h y el reintento de envíos.
+- Seguimiento fuera de la lista: omitido y consumido (no se reintenta).
+- Envío pendiente fuera de la lista: abandonado, sin intento y sin handoff.
+- La identidad del envío sale de su conversación (`JOIN`); sin migración ni
+  variables nuevas.
+
+### Cómo se probó
+
+- `pytest` de Nea con `TEST_DATABASE_URL` (contenedor `vocero-20-pg`, 5433):
+  511 pasan; falla solo `test_pdf_parser_isolated_valid_and_corrupt` (pypdf en
+  el site de usuario de Windows, también en `main`).
+- Nuevas: los dos caminos dentro de la lista, fuera y con la lista vacía;
+  el `JOIN` contra Postgres.
+- En vivo: **pendiente de verificación humana** (hay que dejar vencer un
+  seguimiento con la lista cambiada; próxima ronda en Coolify con
+  `FOLLOWUP_HOURS` bajo). No se tocó Coolify ni WhatsApp.
+
+### Qué sigue
+
+Que Kevin mergee nea-agent#44 (nea-agent#43 ya entró).
+
 ## 2026-10-20 — 033: Laboratorio por contrato (#91)
 
 PRs: [#127](https://github.com/kevinrivm/vocero-crm/pull/127) (CRM) y

@@ -80,6 +80,24 @@ type WebhookConfiguration = {
   };
 };
 
+/**
+ * 065 — El registro en la Cuenta de mensajes del split de 2026. Va aparte del
+ * resultado del número: que falle aquí no cambia si el número quedó.
+ */
+export type MessagingAccountRegistration =
+  | { ok: true }
+  | {
+      ok: true;
+      /** Otra app ya enruta esa cuenta a un override ajeno: se respeta. */
+      skipped: "override_ajeno";
+      host: string;
+    }
+  | {
+      ok: false;
+      code: "invalid_token" | "missing_permission" | "meta_unavailable" | "meta_error";
+      message: string;
+    };
+
 export type WebhookRegistration =
   | {
       ok: true;
@@ -90,6 +108,8 @@ export type WebhookRegistration =
        * Una app sin webhook propio es la sospechosa si no llega nada.
        */
       appWithoutWebhook: boolean;
+      /** 065 — Solo si la conexión tiene Cuenta de mensajes. */
+      messagingAccount?: MessagingAccountRegistration;
     }
   | {
       ok: true;
@@ -128,6 +148,12 @@ export type WebhookRegistration =
  * Por qué en el número y no en la WABA: el del número sobrevive a cualquier
  * `subscribed_apps` sin cuerpo y es el que Meta mira primero. Jamás lanza por
  * una respuesta de Meta: guardar la conexión no puede fallar por esto.
+ *
+ * 065 — Con `messagingAccountId`, además se suscribe la app con override a la
+ * Cuenta de mensajes del split de 2026: sin eso, en las cuentas ya partidas
+ * los entrantes no llegaban aunque el número tuviera su override. Si la
+ * cuenta de WhatsApp enruta a un override ajeno, la de mensajes tampoco se
+ * toca: quien enruta una enruta la otra.
  */
 export async function registerWebhookForNumber(opts: {
   wabaId: string;
@@ -144,6 +170,8 @@ export async function registerWebhookForNumber(opts: {
    * «Guardar» lo vería y quitaría el del número, por la regla de arriba.
    */
   forzar?: boolean;
+  /** 065 — La Cuenta de mensajes; sin ella, todo como antes del split. */
+  messagingAccountId?: string | null;
 }): Promise<WebhookRegistration> {
   const { wabaId, phoneNumberId, token, webhookUrl, verifyToken } = opts;
   const ownPath = pathOf(webhookUrl);
@@ -157,6 +185,7 @@ export async function registerWebhookForNumber(opts: {
     await unregisterWebhookForNumber({ phoneNumberId, token, webhookPath: ownPath });
     return { ok: true, skipped: "waba_override", host };
   }
+  let cuentaPartida = false;
   if (!override || (opts.forzar && !sameWebhookPath(override, ownPath))) {
     if (override) {
       console.log(
@@ -166,8 +195,43 @@ export async function registerWebhookForNumber(opts: {
     try {
       await graphRequest(`${wabaId}/subscribed_apps`, { method: "POST", token });
     } catch (err) {
-      return registrationError(err, "No se pudo suscribir la app a la cuenta de WhatsApp");
+      // 066 — Desde el 28-oct-2026 Meta responde 2388339 aquí en las cuentas
+      // ya partidas: lo que hace llegar los mensajes es la Cuenta de
+      // mensajes. Se decide abajo, con su resultado a la vista.
+      if (!esCuentaPartida(err)) {
+        return registrationError(err, "No se pudo suscribir la app a la cuenta de WhatsApp");
+      }
+      cuentaPartida = true;
     }
+  }
+
+  // 065 — Si la «WABA» guardada YA es la cuenta de mensajes (el parche de
+  // una sola ID), el paso de arriba la cubrió.
+  const messagingAccountId = opts.messagingAccountId?.trim();
+  const messagingAccount =
+    messagingAccountId && messagingAccountId !== wabaId
+      ? await registerWebhookForMessagingAccount({
+          messagingAccountId,
+          token,
+          webhookUrl,
+          verifyToken,
+          forzar: opts.forzar,
+        })
+      : undefined;
+
+  if (cuentaPartida) {
+    if (!messagingAccount) {
+      return {
+        ok: false,
+        code: "meta_error",
+        message:
+          "Meta ya no acepta suscribir la app en la cuenta de WhatsApp (#100/2388339, el split de 2026): escribe el ID de la Cuenta de mensajes y vuelve a registrar el webhook.",
+      };
+    }
+    if (!messagingAccount.ok) return messagingAccount;
+    console.log(
+      `[connect] la cuenta de WhatsApp ${wabaId} respondió 2388339; la de mensajes quedó suscrita y se sigue`
+    );
   }
 
   try {
@@ -198,7 +262,11 @@ export async function registerWebhookForNumber(opts: {
           "Meta aceptó el webhook pero no lo confirma en el número. Vuelve a intentarlo en unos minutos.",
       };
     }
-    return { ok: true, appWithoutWebhook: !res.webhook_configuration.application };
+    return {
+      ok: true,
+      appWithoutWebhook: !res.webhook_configuration.application,
+      ...(messagingAccount ? { messagingAccount } : {}),
+    };
   } catch (err) {
     return registrationError(err, "No se pudo confirmar el webhook en Meta");
   }
@@ -240,6 +308,124 @@ export async function unregisterWebhookForNumber(opts: {
       err instanceof MetaApiError ? `${err.status} ${err.code ?? ""}` : "sin respuesta"
     );
   }
+}
+
+/**
+ * 065 — Suscribe la app a la Cuenta de mensajes con el override de esta
+ * instancia y lo confirma releyendo. Mismas reglas que la cuenta de WhatsApp:
+ * un override nuestro no se toca, uno ajeno se respeta salvo `forzar`.
+ *
+ * Aquí el override va en el cuerpo de `subscribed_apps` (a nivel cuenta): es
+ * lo que destrabó los entrantes en el caso real. Jamás lanza por Meta.
+ */
+async function registerWebhookForMessagingAccount(opts: {
+  messagingAccountId: string;
+  token: string;
+  webhookUrl: string;
+  verifyToken: string;
+  forzar?: boolean;
+}): Promise<MessagingAccountRegistration> {
+  const { messagingAccountId, token, webhookUrl, verifyToken } = opts;
+  const ownPath = pathOf(webhookUrl);
+
+  const actual = await wabaOverride(messagingAccountId, token);
+  if (actual && sameWebhookPath(actual, ownPath)) return { ok: true };
+  if (actual && !opts.forzar) {
+    const host = hostOf(actual);
+    console.log(
+      `[connect] la cuenta de mensajes ${messagingAccountId} enruta a un override (${host}): se respeta`
+    );
+    return { ok: true, skipped: "override_ajeno", host };
+  }
+
+  try {
+    await graphRequest(`${messagingAccountId}/subscribed_apps`, {
+      method: "POST",
+      token,
+      body: { override_callback_uri: webhookUrl, verify_token: verifyToken },
+    });
+  } catch (err) {
+    return messagingAccountError(err, "No se pudo suscribir la app a la Cuenta de mensajes");
+  }
+
+  try {
+    const res = await graphRequest<SubscribedApps | null>(
+      `${messagingAccountId}/subscribed_apps`,
+      { token }
+    );
+    if (!hasOwnOverride(res, ownPath)) {
+      return {
+        ok: false,
+        code: "meta_error",
+        message:
+          "Meta aceptó el webhook en la Cuenta de mensajes pero no lo confirma. Vuelve a intentarlo en unos minutos.",
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    return messagingAccountError(err, "No se pudo confirmar el webhook en la Cuenta de mensajes");
+  }
+}
+
+/**
+ * 065 — Al desconectar, quita el override de la Cuenta de mensajes si es el
+ * de esta instancia (`POST …/subscribed_apps` sin cuerpo: así documenta Meta
+ * borrar el callback alterno). Sin esto, los mensajes seguirían llegando aquí.
+ * Best-effort, como la baja del número.
+ */
+export async function unregisterWebhookForMessagingAccount(opts: {
+  messagingAccountId: string;
+  token: string;
+  webhookPath: string;
+}): Promise<void> {
+  const { messagingAccountId, token, webhookPath } = opts;
+  try {
+    const res = await graphRequest<SubscribedApps | null>(
+      `${messagingAccountId}/subscribed_apps`,
+      { token }
+    );
+    if (!hasOwnOverride(res, webhookPath)) return;
+    await graphRequest(`${messagingAccountId}/subscribed_apps`, {
+      method: "POST",
+      token,
+    });
+  } catch (err) {
+    console.warn(
+      "[connect] no se pudo quitar el webhook de la cuenta de mensajes al desconectar:",
+      err instanceof MetaApiError ? `${err.status} ${err.code ?? ""}` : "sin respuesta"
+    );
+  }
+}
+
+/**
+ * 065 — Intenta descubrir la Cuenta de mensajes de una cuenta de WhatsApp.
+ *
+ * NEEDS CLARIFICATION: `paid_messaging_account_id` lo citan terceros y no
+ * está en la doc oficial. Por eso es un extra: cualquier error o respuesta
+ * rara devuelve `null` y la conexión se guarda igual, sin ella.
+ */
+export async function descubrirCuentaDeMensajes(
+  wabaId: string,
+  token: string
+): Promise<string | null> {
+  try {
+    const res = await graphRequest<{
+      paid_messaging_account_id?: string | { id?: string } | null;
+    } | null>(`${wabaId}?fields=paid_messaging_account_id`, { token });
+    const campo = res?.paid_messaging_account_id;
+    const id = (typeof campo === "string" ? campo : campo?.id)?.trim();
+    return id && /^\d+$/.test(id) && id !== wabaId ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasOwnOverride(res: SubscribedApps | null, path: string): boolean {
+  return (Array.isArray(res?.data) ? res.data : []).some(
+    (app) =>
+      typeof app?.override_callback_uri === "string" &&
+      sameWebhookPath(app.override_callback_uri, path)
+  );
 }
 
 /**
@@ -306,6 +492,27 @@ function registrationError(err: unknown, context: string): WebhookRegistration {
     };
   }
   return { ok: false, code: "meta_error", message: `${context}: ${err.message}` };
+}
+
+/**
+ * 065 — Como `registrationError`, pero el permiso que falta casi siempre es el
+ * de la Cuenta de mensajes: el token ya administra la de WhatsApp.
+ */
+function messagingAccountError(
+  err: unknown,
+  context: string
+): MessagingAccountRegistration {
+  const res = registrationError(err, context);
+  if (res.ok || res.code !== "missing_permission") return res.ok ? { ok: true } : res;
+  return {
+    ...res,
+    message: `${context}: el usuario del sistema no tiene asignada la Cuenta de mensajes (Usuarios del sistema › Asignar activos › Messaging accounts). El mismo token sirve en cuanto se asigna.`,
+  };
+}
+
+/** 066 — `#100` subcode `2388339`: la cuenta de WhatsApp ya está partida. */
+function esCuentaPartida(err: unknown): boolean {
+  return err instanceof MetaApiError && err.subcode === 2388339;
 }
 
 function sameWebhookPath(url: string, path: string): boolean {

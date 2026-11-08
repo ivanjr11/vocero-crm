@@ -34,6 +34,15 @@ export class MetaApiError extends Error {
     if (this.status >= 500) return false;
     return this.status === 401 || this.code === 190;
   }
+
+  /** El `error_subcode` de Meta, si vino (ej. 2388339 del split de 2026). */
+  get subcode(): number | null {
+    const sub = (this.details as { error?: { error_subcode?: unknown } } | null)
+      ?.error?.error_subcode;
+    return typeof sub === "number" || typeof sub === "string"
+      ? Number(sub) || null
+      : null;
+  }
 }
 
 export async function graphRequest<T>(

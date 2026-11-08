@@ -92,15 +92,18 @@ export function describeValue(key: string, value: string): string {
   return value;
 }
 
-/** El mensaje de zod en español y sin el valor (zod no lo incluye, pero por si acaso). */
-export function translateIssue(issue: ZodIssue): string {
+/**
+ * El mensaje de zod en español y sin el valor (zod no lo incluye, pero por si
+ * acaso). Zod 4 ya no dice qué recibió: si falta se sabe por `value`.
+ */
+export function translateIssue(issue: ZodIssue, value?: string): string {
   switch (issue.code) {
     case "invalid_type":
-      return issue.received === "undefined"
+      return value === undefined
         ? "falta"
         : `tipo inválido (se esperaba ${issue.expected})`;
-    case "invalid_string":
-      return issue.validation === "url"
+    case "invalid_format":
+      return issue.format === "url"
         ? "no es una URL válida (debe empezar por http:// o https://)"
         : issue.message;
     case "too_small":
@@ -129,7 +132,7 @@ function checkVar(
     };
   }
   if (issue) {
-    return { status: "fail", label: key, detail: translateIssue(issue), fix: fixFor(key) };
+    return { status: "fail", label: key, detail: translateIssue(issue, value), fix: fixFor(key) };
   }
   const present = typeof value === "string" && value !== "";
   if (!present) {

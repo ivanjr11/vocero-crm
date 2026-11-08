@@ -11,7 +11,7 @@ const bodySchema = z.object({
   conversationId: z.string().min(1),
   // Objeto libre a propósito: las claves las define el negocio, y el servidor
   // tolera el drift del LLM en vez de castigarlo con un 422 (ver server/bot/ficha).
-  ficha: z.record(z.unknown()),
+  ficha: z.record(z.string(), z.unknown()),
 });
 
 /**

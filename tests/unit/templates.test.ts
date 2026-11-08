@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countVariables,
+  importableTemplate,
   renderBody,
   validateBodyVariables,
 } from "@/server/whatsapp/templates";
@@ -64,5 +65,76 @@ describe("renderBody", () => {
   it("sin valores → variables vacías", () => {
     expect(renderBody("Hola {{1}}!")).toBe("Hola !");
     expect(renderBody("Hola {{1}} el {{2}}", ["María"])).toBe("Hola María el ");
+  });
+});
+
+describe("importableTemplate (065, puerto de la spec 101: importar lo que ya está en Meta)", () => {
+  const helloWorld = {
+    id: "1234",
+    name: "hello_world",
+    language: "en_US",
+    status: "APPROVED",
+    category: "UTILITY",
+    components: [
+      { type: "HEADER", format: "TEXT", text: "Hello World" },
+      { type: "BODY", text: "Welcome and congratulations!!" },
+      { type: "FOOTER", text: "WhatsApp Business Platform sample message" },
+    ],
+  };
+
+  it("hello_world se importa aprobada, con su cuerpo y su id de Meta", () => {
+    expect(importableTemplate(helloWorld)).toEqual({
+      name: "hello_world",
+      language: "en_US",
+      category: "UTILITY",
+      body: "Welcome and congratulations!!",
+      status: "approved",
+      waTemplateId: "1234",
+      rejectionReason: null,
+    });
+  });
+
+  it("pendiente o rechazada también se importa, con su estado", () => {
+    expect(importableTemplate({ ...helloWorld, status: "PENDING" })?.status).toBe("pending");
+    expect(
+      importableTemplate({ ...helloWorld, status: "REJECTED", rejected_reason: "INVALID_FORMAT" })
+    ).toMatchObject({ status: "rejected", rejectionReason: "INVALID_FORMAT" });
+  });
+
+  it("botones fijos se aceptan", () => {
+    expect(
+      importableTemplate({
+        ...helloWorld,
+        components: [
+          { type: "BODY", text: "Hola {{1}}" },
+          {
+            type: "BUTTONS",
+            buttons: [
+              { type: "QUICK_REPLY", text: "Sí" },
+              { type: "URL", url: "https://vocerocrm.com" },
+            ],
+          },
+        ],
+      })
+    ).not.toBeNull();
+  });
+
+  it("lo que pide parámetros fuera del cuerpo NO se importa", () => {
+    const con = (c: object) => ({
+      ...helloWorld,
+      components: [{ type: "BODY", text: "Hola" }, c],
+    });
+    expect(importableTemplate(con({ type: "HEADER", format: "IMAGE" }))).toBeNull();
+    expect(importableTemplate(con({ type: "HEADER", format: "TEXT", text: "Hola {{1}}" }))).toBeNull();
+    expect(
+      importableTemplate(con({ type: "BUTTONS", buttons: [{ type: "URL", url: "https://x.com/{{1}}" }] }))
+    ).toBeNull();
+    expect(importableTemplate(con({ type: "BUTTONS", buttons: [{ type: "OTP" }] }))).toBeNull();
+  });
+
+  it("autenticación, sin cuerpo o con estado desconocido NO se importa", () => {
+    expect(importableTemplate({ ...helloWorld, category: "AUTHENTICATION" })).toBeNull();
+    expect(importableTemplate({ ...helloWorld, components: [] })).toBeNull();
+    expect(importableTemplate({ ...helloWorld, status: "DISABLED" })).toBeNull();
   });
 });

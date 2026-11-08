@@ -19,6 +19,12 @@
 # nombre tuyo): sin él, Compose puede correr la imagen oficial en vez de tus
 # cambios. Otra versión publicada: VOCERO_CRM_VERSION=X.Y.Z en tu .env.
 #
+# SEGURIDAD (oct-2026): las imágenes publicadas hasta la 2.5.2 traen next
+# 15.5.27, sharp 0.34.5 y Node 22.23.3, vulnerables a RCE sin autenticación en
+# el optimizador de imágenes (CVE-2026-96889 / GHSA-2464-fhr4-w9xw) y en el
+# decodificador Brotli de Node (CVE-2026-111497). La 2.5.3 ya trae next
+# 15.5.28, sharp 0.35.5 y node:22.23.4-alpine: usa la 2.5.3 o una posterior.
+#
 # 2.0 — El agente (Nea) es un servicio al lado del CRM, sobre la MISMA base
 # en su esquema `nea`, y se levanta con todo lo demás. El CRM le despacha cada
 # ráfaga a http://nea:8000 y Nea contesta por /api/bot/*, con la BOT_API_KEY
@@ -39,7 +45,7 @@
 # ============================================================
 services:
   app:
-    image: ghcr.io/kevinrivm/vocero-crm:${VOCERO_CRM_VERSION:-2.4.0}
+    image: ghcr.io/kevinrivm/vocero-crm:${VOCERO_CRM_VERSION:-2.7.0}
     build: .
     restart: unless-stopped
     environment:

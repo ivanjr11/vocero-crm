@@ -25,20 +25,20 @@ const schema = z
     mimeType: z.string().optional(),
     caption: z.string().optional(),
     filename: z.string().optional(),
-    location: z.record(z.unknown()).optional(),
+    location: z.record(z.string(), z.unknown()).optional(),
     // 031 — tarjetas de un mensaje `contacts`, con la forma de Meta.
-    contacts: z.array(z.record(z.unknown())).max(10).optional(),
+    contacts: z.array(z.record(z.string(), z.unknown())).max(10).optional(),
     // 016 — anuncio de origen simulado (referral)
     ctwaClid: z.string().optional(),
     adHeadline: z.string().optional(),
     adSourceId: z.string().optional(),
     // 018 — o el `referral` entero, con la forma de Meta (image_url incluida)
-    referral: z.record(z.unknown()).optional(),
+    referral: z.record(z.string(), z.unknown()).optional(),
     // #78 — respuestas de botón, con la forma de Meta (type "button" e "interactive")
     button: z
       .object({ text: z.string(), payload: z.string().optional() })
       .optional(),
-    interactive: z.record(z.unknown()).optional(),
+    interactive: z.record(z.string(), z.unknown()).optional(),
     // 039 — el wamid que el cliente cita (llega en `context.id`)
     replyTo: z.string().optional(),
   })

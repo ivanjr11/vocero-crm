@@ -72,6 +72,7 @@ export const POST = withAuth(async (session, req: Request) => {
     webhookUrl: webhookUrl("wa"),
     verifyToken: webhookVerifyToken(),
     forzar: recuperar,
+    messagingAccountId: creds.messagingAccountId,
   });
   if (!resultado.ok) {
     const status = resultado.code === "meta_unavailable" ? 503 : 422;

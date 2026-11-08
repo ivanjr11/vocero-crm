@@ -13,10 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmbeddedSignup } from "./embedded-signup";
 import { EntregasCard } from "./entregas-card";
 
 type Connection = {
   wabaId: string;
+  messagingAccountId: string | null;
   phoneNumberId: string;
   displayPhoneNumber: string | null;
   verifiedName: string | null;
@@ -33,8 +35,13 @@ type WebhookInfo = {
 
 /** Lo que devuelve el registro del webhook en Meta (al guardar o a demanda). */
 type WebhookRegistration =
-  | { ok: true; appWithoutWebhook: boolean }
+  | { ok: true; appWithoutWebhook: boolean; messagingAccount?: MessagingAccountRegistration }
   | { ok: true; skipped: "waba_override"; host: string }
+  | { ok: false; message: string };
+
+/** 065 — El registro en la Cuenta de mensajes, aparte del del número. */
+type MessagingAccountRegistration =
+  | { ok: true; skipped?: "override_ajeno"; host?: string }
   | { ok: false; message: string };
 
 /**
@@ -42,7 +49,10 @@ type WebhookRegistration =
  * con uno por tarjeta, guardar con un token sin permiso dejaba el «registrado»
  * de un clic anterior al lado del aviso nuevo.
  */
-type LastRegistration = { result: WebhookRegistration; from: "save" | "button" };
+type LastRegistration = {
+  result: WebhookRegistration;
+  from: "save" | "button" | "embedded";
+};
 
 export function WhatsappWizard() {
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -115,7 +125,22 @@ export function WhatsappWizard() {
         </div>
       )}
 
+      {/* 066 — La conexión oficial con Meta. Sin la app configurada en la
+          instancia no se dibuja y queda solo el alta manual de abajo. */}
+      <EmbeddedSignup
+        onConnected={(r) => {
+          setRegistration({ result: r.webhook as WebhookRegistration, from: "embedded" });
+          void refetch();
+        }}
+      />
+      {registration?.from === "embedded" && (
+        <RegistrationNotice registration={registration.result} afterSave />
+      )}
+
       <ConnectForm
+        // 066 — Se rehace si la conexión cambia por «Conectar con Meta»:
+        // los campos toman los IDs nuevos.
+        key={connection?.phoneNumberId ?? "sin-conexion"}
         existing={connection}
         registration={registration?.from === "save" ? registration.result : null}
         onRegistration={(result) =>
@@ -223,6 +248,9 @@ function ConnectForm({
   onSaved: () => void;
 }) {
   const [wabaId, setWabaId] = useState(existing?.wabaId ?? "");
+  const [messagingAccountId, setMessagingAccountId] = useState(
+    existing?.messagingAccountId ?? ""
+  );
   const [phoneNumberId, setPhoneNumberId] = useState(
     existing?.phoneNumberId ?? ""
   );
@@ -272,7 +300,16 @@ function ConnectForm({
     const res = await fetch("/api/settings/whatsapp", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ wabaId, phoneNumberId, token }),
+      body: JSON.stringify({
+        wabaId,
+        phoneNumberId,
+        token,
+        // 065 — Vacía con una guardada = quitarla; vacía sin guardada = que
+        // el servidor intente descubrirla.
+        ...(messagingAccountId.trim() || existing?.messagingAccountId
+          ? { messagingAccountId: messagingAccountId.trim() }
+          : {}),
+      }),
     }).catch(() => null);
     setSaving(false);
     if (!res?.ok) {
@@ -352,6 +389,25 @@ function ConnectForm({
           </div>
         </div>
         <div className="space-y-1.5">
+          <Label htmlFor="messaging-account-id">
+            ID de la Cuenta de mensajes{" "}
+            <span className="font-normal text-muted-foreground">(recomendado)</span>
+          </Label>
+          <Input
+            id="messaging-account-id"
+            inputMode="numeric"
+            placeholder="Business Settings › Cuentas › Cuentas de mensajes"
+            value={messagingAccountId}
+            onChange={(e) => setMessagingAccountId(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Desde 2026 Meta separa la cuenta de WhatsApp (el número) de la
+            Cuenta de mensajes (plantillas y pago). Con ella, las plantillas se
+            crean donde Meta las acepta y el webhook se registra en las dos.
+            Si la dejas vacía, intentamos encontrarla.
+          </p>
+        </div>
+        <div className="space-y-1.5">
           <Label htmlFor="token">Token de acceso</Label>
           <Input
             id="token"
@@ -412,6 +468,15 @@ function RegistrationNotice({
   registration: WebhookRegistration;
   afterSave?: boolean;
 }) {
+  if (registration.ok && "messagingAccount" in registration && registration.messagingAccount) {
+    const { messagingAccount, ...delNumero } = registration;
+    return (
+      <div className="space-y-2">
+        <RegistrationNotice registration={delNumero} afterSave={afterSave} />
+        <MessagingAccountNotice result={messagingAccount} />
+      </div>
+    );
+  }
   if (registration.ok && "skipped" in registration) {
     return (
       <p className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -453,6 +518,38 @@ function RegistrationNotice({
             «Registrar en Meta» o pega la URL y el verify token a mano.
           </>
         )}
+      </span>
+    </p>
+  );
+}
+
+/** 065 — Cómo quedó el webhook en la Cuenta de mensajes del split de 2026. */
+function MessagingAccountNotice({ result }: { result: MessagingAccountRegistration }) {
+  if (result.ok && result.skipped) {
+    return (
+      <p className="flex items-start gap-2 text-sm text-muted-foreground">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>
+          Tu Cuenta de mensajes ya enruta sus webhooks a{" "}
+          <span className="text-foreground">{result.host}</span>. Se respeta.
+        </span>
+      </p>
+    );
+  }
+  if (result.ok) {
+    return (
+      <p className="flex items-start gap-2 text-sm text-success">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+        Webhook registrado también en la Cuenta de mensajes.
+      </p>
+    );
+  }
+  return (
+    <p className="flex items-start gap-2 rounded-md border border-warning-soft bg-warning-tint p-3 text-xs text-warning-text">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>
+        {result.message} Sin esto, en las cuentas de Meta ya separadas los
+        mensajes entrantes pueden no llegar.
       </span>
     </p>
   );

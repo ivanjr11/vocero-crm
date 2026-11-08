@@ -26,7 +26,7 @@ const schema = z.object({
   mimeType: z.string().optional(),
   caption: z.string().optional(),
   filename: z.string().optional(),
-  location: z.record(z.unknown()).optional(),
+  location: z.record(z.string(), z.unknown()).optional(),
   useMessagesKey: z.boolean().optional(),
 });
 
