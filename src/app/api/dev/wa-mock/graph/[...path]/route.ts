@@ -135,6 +135,26 @@ async function callbackVerificationError(
   }
 }
 
+/**
+ * 065 — Lo que Meta responde al pedir plantillas a una cuenta de WhatsApp ya
+ * partida por el split de 2026: solo las acepta la Cuenta de mensajes.
+ */
+function cuentaSinPlantillasResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        message: "Invalid parameter",
+        type: "OAuthException",
+        code: 100,
+        error_subcode: 2388339,
+        error_user_title: "This API is not supported for this WhatsApp Business Account",
+        fbtrace_id: "mock",
+      },
+    },
+    { status: 400 }
+  );
+}
+
 /** Un teléfono de Meta es solo dígitos; un BSUID lleva prefijo y punto. */
 function esSoloDigitos(valor: string): boolean {
   return /^[0-9]+$/.test(valor);
@@ -152,11 +172,65 @@ export async function GET(req: Request, ctx: Params) {
   const token = bearerToken(req);
   if (token.endsWith("-invalid")) return invalidTokenResponse();
 
-  // GET {wabaId}/message_templates → lista para el sync
+  // 066 — GET oauth/access_token?client_id&client_secret&code → el canje del
+  // Embedded Signup. Como Meta: el secreto tiene que ser el de la app y cada
+  // `code` sirve una sola vez. El token sale del código, para que el arnés
+  // pueda pedir uno «-sin-gestion».
+  if (path.length === 2 && path[0] === "oauth" && path[1] === "access_token") {
+    const params = new URL(req.url).searchParams;
+    const code = params.get("code") ?? "";
+    const state = getWaMockState();
+    const secret = getEnv().META_APP_SECRET ?? "";
+    if (
+      !code ||
+      code.startsWith("es-invalido") ||
+      state.usedCodes.includes(code) ||
+      !params.get("client_id") ||
+      params.get("client_secret") !== secret
+    ) {
+      return Response.json(
+        {
+          error: {
+            message: "Invalid verification code format.",
+            type: "OAuthException",
+            code: 100,
+            fbtrace_id: "mock",
+          },
+        },
+        { status: 400 }
+      );
+    }
+    state.usedCodes.push(code);
+    return Response.json({
+      access_token: `EAAG-embedded-${code}`,
+      token_type: "bearer",
+    });
+  }
+
+  // 066 — GET {wabaId}/phone_numbers → los números sembrados de esa WABA.
+  if (path.length === 2 && path[1] === "phone_numbers") {
+    return Response.json({ data: getWaMockState().wabaNumbers[path[0]!] ?? [] });
+  }
+
+  // GET {wabaId}/message_templates → lista para el sync. 065: paginada por
+  // cursor como Meta (`limit` + `after`, `paging.next` solo si hay más), y
+  // una cuenta de WhatsApp ya partida la rechaza con 2388339.
   if (path.length === 2 && path[1] === "message_templates") {
     const state = getWaMockState();
+    if (state.splitAccounts[path[0]!]) return cuentaSinPlantillasResponse();
+    const params = new URL(req.url).searchParams;
+    // Sin `limit`, todo de una vez: los guiones que leen el «panel» directo
+    // no paginan. El CRM siempre manda `limit`.
+    const limit = params.has("limit")
+      ? Math.min(Math.max(Number(params.get("limit")) || 25, 1), 100)
+      : state.templates.length || 1;
+    const after = params.get("after");
+    const start = after ? Number(Buffer.from(after, "base64").toString()) || 0 : 0;
+    const page = state.templates.slice(start, start + limit);
+    const end = start + page.length;
+    const cursor = (i: number) => Buffer.from(String(i)).toString("base64");
     return Response.json({
-      data: state.templates.map((t) => ({
+      data: page.map((t) => ({
         id: t.id,
         name: t.name,
         language: t.language,
@@ -164,6 +238,12 @@ export async function GET(req: Request, ctx: Params) {
         status: t.status,
         components: t.components ?? [{ type: "BODY", text: t.body }],
       })),
+      paging: {
+        cursors: { before: cursor(start), after: cursor(end) },
+        ...(end < state.templates.length
+          ? { next: `${new URL(req.url).origin}${new URL(req.url).pathname}?after=${cursor(end)}` }
+          : {}),
+      },
     });
   }
 
@@ -219,6 +299,28 @@ export async function GET(req: Request, ctx: Params) {
       },
       id: path[0],
     });
+  }
+
+  // 065 — GET {wabaId}?fields=paid_messaging_account_id → la Cuenta de
+  // mensajes de una cuenta partida. Campo no documentado: si la cuenta no la
+  // revela, Meta responde 100 «nonexisting field», y el CRM sigue sin ella.
+  if (path.length === 1 && fields.includes("paid_messaging_account_id")) {
+    const split = getWaMockState().splitAccounts[path[0]!];
+    if (!split?.descubrible) {
+      return Response.json(
+        {
+          error: {
+            message:
+              "(#100) Tried accessing nonexisting field (paid_messaging_account_id)",
+            type: "OAuthException",
+            code: 100,
+            fbtrace_id: "mock",
+          },
+        },
+        { status: 400 }
+      );
+    }
+    return Response.json({ id: path[0], paid_messaging_account_id: split.messagingAccountId });
   }
 
   if (path.length === 1 && fields.includes("first_name")) {
@@ -448,6 +550,7 @@ export async function POST(req: Request, ctx: Params) {
   // POST {wabaId}/message_templates → alta de plantilla (queda PENDING)
   if (path.length === 2 && path[1] === "message_templates") {
     const state = getWaMockState();
+    if (state.splitAccounts[path[0]!]) return cuentaSinPlantillasResponse();
     const components = (body.components ?? []) as {
       type?: string;
       text?: string;
@@ -488,12 +591,41 @@ export async function POST(req: Request, ctx: Params) {
     return Response.json({ id: tpl.id, status: "PENDING", category: tpl.category });
   }
 
+  // 066 — POST {phoneNumberId}/register → registra el número en la Cloud API
+  // con su PIN. "000000" imita un número que ya tenía otro PIN.
+  if (path.length === 2 && path[1] === "register") {
+    const pin = String(body.pin ?? "");
+    if (body.messaging_product !== "whatsapp" || !/^\d{6}$/.test(pin) || pin === "000000") {
+      return Response.json(
+        {
+          error: {
+            message: "(#133005) Two step verification PIN Mismatch",
+            type: "OAuthException",
+            code: 133005,
+            fbtrace_id: "mock",
+          },
+        },
+        { status: 400 }
+      );
+    }
+    const state = getWaMockState();
+    state.registrations[path[0]!] = pin;
+    for (const numeros of Object.values(state.wabaNumbers)) {
+      for (const n of numeros) if (n.id === path[0]) n.status = "CONNECTED";
+    }
+    return Response.json({ success: true });
+  }
+
   // POST {wabaId}/subscribed_apps → suscribe la app. Como en Meta, el override
   // de callback se fija mandándolo en el cuerpo y un POST SIN él lo BORRA
   // ("Delete WABA alternate callback"): un CRM que re-suscribe a ciegas
   // desconecta aquí al cerebro externo igual que en producción.
   if (path.length === 2 && path[1] === "subscribed_apps") {
     if (token.endsWith(SIN_GESTION)) return permissionErrorResponse();
+    // 066 — La cuenta de WhatsApp partida que ya rechaza la suscripción.
+    if (getWaMockState().splitAccounts[path[0]!]?.rechazaSuscripcion) {
+      return cuentaSinPlantillasResponse();
+    }
     const uri =
       typeof body.override_callback_uri === "string"
         ? body.override_callback_uri.trim()

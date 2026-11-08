@@ -230,6 +230,7 @@ describe("checkWhatsApp", () => {
     id: "cred_1",
     organizationId: "org_1",
     wabaId: "waba1",
+    messagingAccountId: null,
     phoneNumberId: "pn1",
     displayPhoneNumber: "+52 1 55 0000 0000",
     verifiedName: "Ferretería",

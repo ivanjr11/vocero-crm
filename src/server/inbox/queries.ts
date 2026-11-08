@@ -44,10 +44,14 @@ export async function listConversations(
   since?: Date
 ): Promise<ConversationDto[]> {
   const db = getDb();
+  // 064 — `organization_id` primero: es la primera columna de
+  // `message_org_conv_idx`. Sin ella Postgres recorre TODOS los mensajes por
+  // cada conversación de la lista (segundos con unas decenas de miles).
   const previewSql = sql<string | null>`(
     select coalesce(m.text, m.type)
     from message m
-    where m.conversation_id = ${schema.conversation.id}
+    where m.organization_id = ${schema.conversation.organizationId}
+      and m.conversation_id = ${schema.conversation.id}
     order by m.created_at desc
     limit 1
   )`;

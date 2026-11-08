@@ -33,6 +33,12 @@ producto** — y saberlo antes de leerla ahorra una confusión.
 | `049-respuestas-rapidas` | Ciclo completo | spec, plan, tasks (respuestas rápidas con «/» en el compositor, administradas en Ajustes; migración aditiva `0024`) |
 | `050-notas-internas` | Ciclo completo | spec, plan, tasks (notas internas en el hilo, en su propia tabla; migración aditiva `0025`; enmienda el contrato SSE con `note.new` y `note.deleted`) |
 | `051-borrador-por-conversacion` | Ligero | spec (lo escrito en una conversación vuelve al regresar; en el navegador, se borra al enviar, a los 7 días y al cerrar sesión) |
+| `061-diseno-tarjetas` | Ligero | spec (diseño de tarjetas inspirado en la referencia 6: marco, riel de iconos, Bandeja en tarjetas, cliente en burbuja oscura, compositor en cápsula; tema Menta / Noche) |
+| `062-apariencia` | Ligero | spec (Ajustes → Apariencia: temas listos, tema propio, letra, tamaño y densidad; predeterminado del negocio y elección por persona) |
+| `063-fondo-chat-dibujos` | Ligero | spec (fondo del chat con dibujos a la WhatsApp, con el carnero, el pulpo, el plato de DJ y la diosa de AISHIA; Alto contraste sin dibujos) |
+| `064-lista-conversaciones-rapida` | Ligero | spec (la vista previa de la lista usa el índice de `message` y una ráfaga de mensajes recarga la lista una vez por pestaña, no cuatro; menú y Ctrl+K toman la lista de la Bandeja; sin migración) |
+| `065-cuenta-de-mensajes` | Ciclo completo | spec, plan, tasks, migrar (el split de Meta de 2026: se guarda también la Cuenta de mensajes, las plantillas se crean y sincronizan ahí y el webhook se registra en las dos; el sync importa `hello_world` y las creadas fuera de Vocero; migración aditiva `0026`) |
+| `066-embedded-signup` | Ciclo completo | spec, plan, tasks («Conectar con Meta»: Embedded Signup v4 en Ajustes → WhatsApp con `META_APP_ID` + `META_EMBEDDED_CONFIG_ID` + `META_APP_SECRET`; canje del code, registro del número con PIN, webhook en las dos cuentas; `2388339` en la cuenta de WhatsApp ya no es fatal; sin migración; sin coexistencia) |
 | `055-atajos-de-teclado` | Ligero | spec (Ctrl+K para ir a una pantalla o conversación, «?» para la ayuda; Alt+J/K, «/», Alt+R y Alt+N en la Bandeja) |
 | `054-eventos-en-el-hilo` | Ligero | spec (cambios de etapa y traspaso a una persona pintados en el hilo, con lo que ya se guarda; `GET …/eventos`) |
 | `056-avisos-y-sin-conexion` | Ligero | spec (avisos del sistema con Vocero oculto, sin push; banda «sin conexión» y reconexión del SSE con espera creciente) |

@@ -27,6 +27,10 @@ de bandeja manual y contestas tú. El token de WhatsApp nunca sale del CRM.
 > 🎬 **Video-instalador oficial**: próximamente en
 > [el canal de Kevin Belier](https://www.youtube.com/@KevinBelier)
 
+> 💼 **¿Quieres venderlo a otros negocios?** Vocero es gratis para tu negocio.
+> Cómo venderlo, adaptarlo a cada cliente y entregarlo sin que truene se aprende en
+> la [VIBE Community](https://kevinbelier.cloud/comunidad).
+
 ## ¿Para quién es?
 
 - **Agencias de IA/automatización** que implementan CRM + agente para sus
@@ -306,7 +310,7 @@ Meta y tu proveedor LLM opcional.
 ## Instalación (~15 minutos)
 
 Cada versión se publica como imagen de Docker:
-`ghcr.io/kevinrivm/vocero-crm:<versión>` (p. ej. `2.4.0`). Instalar desde
+`ghcr.io/kevinrivm/vocero-crm:<versión>` (p. ej. `2.7.0`). Instalar desde
 la imagen es el camino recomendado: tu servidor la descarga en vez de
 construirla. Construir desde el código sigue funcionando, y es lo que
 necesitas en un VPS ARM o si tu fork cambia el código.
@@ -358,7 +362,7 @@ código si no la encuentra ni en el registro ni en tu máquina. Así que:
   `--build` Compose puede correr la oficial en vez de tus cambios.
 
 Caddy emite el certificado HTTPS solo. Verifica con
-`https://crm.tudominio.com/api/health` → `{"ok":true,"version":"2.4.0",…}`.
+`https://crm.tudominio.com/api/health` → `{"ok":true,"version":"2.7.0",…}`.
 
 ### Otras plataformas: Render, Fly y Railway
 
@@ -367,7 +371,7 @@ imagen publicada, montan `/data` y vigilan `/api/health`; cada uno declara lo
 que su plataforma le deja declarar y documenta, en comentarios, lo que queda a
 mano. La imagen va fijada a la versión (una prueba lo exige). Verifica igual
 que arriba: `curl -s https://<tu-url>/api/health` →
-`{"ok":true,"version":"2.4.0",…,"mediaWritable":true}`.
+`{"ok":true,"version":"2.7.0",…,"mediaWritable":true}`.
 
 **Render** — [`render.yaml`](render.yaml) es un Blueprint completo: servicio
 web desde la imagen, base Postgres gestionada, disco de 1 GB en `/data`,
@@ -400,7 +404,7 @@ el dominio y las variables se crean con la CLI, con los comandos exactos
 escritos en el propio archivo (`railway add --database postgres`,
 `railway volume add --mount-path /data`, `railway domain --port 3000`,
 `railway variable set …`, `railway up`). Para la imagen publicada sin build:
-`railway add --image ghcr.io/kevinrivm/vocero-crm:2.4.0`, y entonces el
+`railway add --image ghcr.io/kevinrivm/vocero-crm:2.7.0`, y entonces el
 healthcheck se fija en el panel. Railway declaró obsoleto este formato a
 favor de su Infrastructure as Code (`.railway/railway.ts`); lo sigue leyendo
 hasta el 2026-12-01.
@@ -470,6 +474,14 @@ Vocero **consume** un token de la WhatsApp Cloud API — no implementa el
 Embedded Signup. Hay dos formas de obtenerlo:
 
 ### Modo directo (el negocio tiene su propia app de Meta)
+
+> **Atajo: «Conectar con Meta».** Con `META_APP_ID`,
+> `META_EMBEDDED_CONFIG_ID` y `META_APP_SECRET` en la instancia, Ajustes →
+> WhatsApp muestra un botón que abre la ventana oficial de Meta (Embedded
+> Signup v4) y deja el número conectado sin pegar tokens: registra el número y
+> el webhook solo. Qué poner en el panel de Meta (dominios, configuración de
+> login): [docs/embedded-signup.md](docs/embedded-signup.md). Sin esas
+> variables, sigue el alta manual de abajo.
 
 1. Crea una app en [developers.facebook.com](https://developers.facebook.com)
    con el producto WhatsApp y vincula tu número.
@@ -915,8 +927,8 @@ repo ayuda a que más gente lo encuentre.
 ## Créditos
 
 Creado por [Kevin Belier](https://www.youtube.com/@KevinBelier). ¿Quieres
-aprender a convertirte en Meta Tech Provider y monetizar con tu agencia de IA?
-Únete a la [VIBE Community](https://www.skool.com/vibe-community-vip). Los patrones
+venderlo a otros negocios, adaptarlo y entregarlo sin que truene? Únete a la
+[VIBE Community](https://kevinbelier.cloud/comunidad). Los patrones
 de producción (webhook firmado, ingesta idempotente, cifrado de tokens) vienen
 de un proyecto de referencia privado en producción, portados y simplificados
 para este repo.

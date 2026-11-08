@@ -21,9 +21,12 @@ const register = vi.hoisted(() => vi.fn());
 const unregister = vi.hoisted(() => vi.fn(async () => {}));
 const save = vi.hoisted(() => vi.fn(async () => {}));
 const disconnect = vi.hoisted(() => vi.fn(async () => {}));
+const descubrir = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
+const unregisterMsg = vi.hoisted(() => vi.fn(async () => {}));
 const creds = vi.hoisted(() => ({
   current: null as null | {
     wabaId: string;
+    messagingAccountId?: string | null;
     phoneNumberId: string;
     token: string;
     status: string;
@@ -54,6 +57,8 @@ vi.mock("@/server/whatsapp/connect", () => ({
   }),
   registerWebhookForNumber: register,
   unregisterWebhookForNumber: unregister,
+  descubrirCuentaDeMensajes: descubrir,
+  unregisterWebhookForMessagingAccount: unregisterMsg,
 }));
 
 import { DELETE, PUT } from "@/app/api/settings/whatsapp/route";
@@ -68,12 +73,12 @@ const peticion = (cuerpo?: unknown) =>
 
 const URL_FIJA = "https://crm.ejemplo.test/api/webhooks/wa/verify-abc";
 
-const put = () =>
+const put = (extra: Record<string, unknown> = {}) =>
   PUT(
     new Request("https://crm.ejemplo.test/api/settings/whatsapp", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ wabaId: "111", phoneNumberId: "222", token: "EAAG-token" }),
+      body: JSON.stringify({ wabaId: "111", phoneNumberId: "222", token: "EAAG-token", ...extra }),
     })
   );
 
@@ -82,6 +87,9 @@ beforeEach(() => {
   unregister.mockClear();
   save.mockClear();
   disconnect.mockClear();
+  descubrir.mockReset();
+  descubrir.mockResolvedValue(null);
+  unregisterMsg.mockClear();
   creds.current = null;
 });
 
@@ -97,10 +105,12 @@ describe("guardar la conexión registra el webhook", () => {
       token: "EAAG-token",
       webhookUrl: URL_FIJA,
       verifyToken: "verify-abc",
+      messagingAccountId: null,
     });
     expect(await res.json()).toEqual({
       ok: true,
       displayPhoneNumber: "+52 55 0000 0000",
+      messagingAccountId: null,
       webhook: { ok: true, appWithoutWebhook: false },
     });
   });
@@ -252,5 +262,121 @@ describe("035 — «Recuperar el webhook»", () => {
     } finally {
       sesion.role = "owner";
     }
+  });
+});
+
+describe("065 — la Cuenta de mensajes al guardar y al desconectar", () => {
+  const guardada = () => (save.mock.calls.at(-1) as unknown as [{ messagingAccountId?: string | null }])[0];
+
+  it("la que viene se guarda y se registra el webhook también en ella", async () => {
+    register.mockResolvedValueOnce({ ok: true, appWithoutWebhook: false, messagingAccount: { ok: true } });
+    const res = await put({ messagingAccountId: "333" });
+    expect(guardada().messagingAccountId).toBe("333");
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ messagingAccountId: "333" }));
+    expect(descubrir).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({
+      messagingAccountId: "333",
+      webhook: { messagingAccount: { ok: true } },
+    });
+  });
+
+  it("sin el campo conserva la guardada: rotar el token no la borra", async () => {
+    creds.current = {
+      wabaId: "111",
+      messagingAccountId: "333",
+      phoneNumberId: "222",
+      token: "EAAG-viejo",
+      status: "connected",
+      displayPhoneNumber: null,
+      verifiedName: null,
+    };
+    register.mockResolvedValueOnce({ ok: true, appWithoutWebhook: false });
+    await put();
+    expect(guardada().messagingAccountId).toBe("333");
+    expect(descubrir).not.toHaveBeenCalled();
+  });
+
+  it("sin el campo y sin guardada, intenta descubrirla; si no puede, guarda igual", async () => {
+    register.mockResolvedValue({ ok: true, appWithoutWebhook: false });
+    descubrir.mockResolvedValueOnce("444");
+    await put();
+    expect(descubrir).toHaveBeenCalledWith("111", "EAAG-token");
+    expect(guardada().messagingAccountId).toBe("444");
+
+    const res = await put();
+    expect(res.status).toBe(200);
+    expect(guardada().messagingAccountId).toBeNull();
+  });
+
+  it("vacía la quita a propósito, sin descubrir", async () => {
+    creds.current = {
+      wabaId: "111",
+      messagingAccountId: "333",
+      phoneNumberId: "222",
+      token: "EAAG-viejo",
+      status: "connected",
+      displayPhoneNumber: null,
+      verifiedName: null,
+    };
+    register.mockResolvedValueOnce({ ok: true, appWithoutWebhook: false });
+    await put({ messagingAccountId: "" });
+    expect(guardada().messagingAccountId).toBeNull();
+    expect(descubrir).not.toHaveBeenCalled();
+  });
+
+  it("una ID no numérica se rechaza con 422 sin guardar nada", async () => {
+    const res = await put({ messagingAccountId: "cuenta-de-mensajes" });
+    expect(res.status).toBe(422);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("«Registrar en Meta» usa la guardada", async () => {
+    creds.current = {
+      wabaId: "111",
+      messagingAccountId: "333",
+      phoneNumberId: "222",
+      token: "EAAG-guardado",
+      status: "connected",
+      displayPhoneNumber: null,
+      verifiedName: null,
+    };
+    register.mockResolvedValueOnce({ ok: true, appWithoutWebhook: false });
+    await webhookPost(peticion());
+    expect(register).toHaveBeenLastCalledWith(expect.objectContaining({ messagingAccountId: "333" }));
+  });
+
+  it("desconectar quita también el override de la cuenta de mensajes, antes de borrar el token", async () => {
+    creds.current = {
+      wabaId: "111",
+      messagingAccountId: "333",
+      phoneNumberId: "222",
+      token: "EAAG-token",
+      status: "connected",
+      displayPhoneNumber: null,
+      verifiedName: null,
+    };
+    unregisterMsg.mockImplementationOnce(async () => {
+      expect(disconnect).not.toHaveBeenCalled();
+    });
+    await DELETE();
+    expect(unregisterMsg).toHaveBeenCalledWith({
+      messagingAccountId: "333",
+      token: "EAAG-token",
+      webhookPath: "/api/webhooks/wa/verify-abc",
+    });
+    expect(disconnect).toHaveBeenCalledWith("org_a");
+  });
+
+  it("sin cuenta de mensajes, desconectar no la toca", async () => {
+    creds.current = {
+      wabaId: "111",
+      phoneNumberId: "222",
+      token: "EAAG-token",
+      status: "connected",
+      displayPhoneNumber: null,
+      verifiedName: null,
+    };
+    await DELETE();
+    expect(unregisterMsg).not.toHaveBeenCalled();
   });
 });

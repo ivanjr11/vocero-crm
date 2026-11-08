@@ -20,6 +20,11 @@ export const envSchema = z.object({
     }),
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(8),
   META_APP_SECRET: z.string().optional(),
+  // 066: «Conectar con Meta» (Embedded Signup v4) en Ajustes → WhatsApp. Con
+  // las dos y META_APP_SECRET (el de ESA app) aparece el botón; sin ellas,
+  // solo el alta manual. Se leen en server/whatsapp/embedded.ts.
+  META_APP_ID: z.string().optional(),
+  META_EMBEDDED_CONFIG_ID: z.string().optional(),
   META_GRAPH_API_VERSION: z.string().default("v25.0"),
   META_GRAPH_BASE_URL: z.string().url().default("https://graph.facebook.com"),
   OPENROUTER_API_TOKEN: z.string().optional(),

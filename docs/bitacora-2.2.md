@@ -885,3 +885,164 @@ el fallo de la 049 (abajo).
    - El arnés ahora vacía la caja antes de teclear.
 2. **El tope de inicios de sesión** volvió a cortar una pasada. Se reinició el
    servidor.
+
+## 2026-10-24 — 061: diseño de tarjetas (referencia 6)
+
+**Qué pidió Kevin**: las dos versiones sobre crm.s4luia.com (#166, #167) le
+gustaron, pero «se puede hacer algo más bonito». Pidió referencias en la web.
+De 10 que le mostré en una galería, eligió la 6: tarjetas blancas separadas
+sobre un marco suave, un riel de iconos y el cliente en burbuja oscura.
+
+**Tiempos reales**: specs 061 y 062 en commit a las 23:49 (23 oct). El
+self-test general quedó 280/280 a las 00:46.
+
+**Qué cambió**:
+
+- **Tokens**: el claro pasa a **Menta** y el oscuro a **Noche**. Hay tokens
+  nuevos de marco, tarjeta, riel, envío y burbujas (texto, gris, enlace y
+  superficie propios).
+- **Marco y tarjetas** en escritorio: el riel, el buscador en cápsula, la
+  lista, la cabecera del hilo, el hilo y el panel, con radio 24 y 12 px entre
+  ellas. En el teléfono, la pantalla entera es la tarjeta.
+- **El riel de iconos** reemplaza al menú lateral de texto en escritorio:
+  - la activa va rellena con la tinta del tema;
+  - la Bandeja muestra su número;
+  - abajo van la campana, Ajustes y la cuenta. La cuenta trae tema,
+    «Activar avisos», «Instalar app», cerrar sesión y la versión.
+
+  En el teléfono sigue el cajón, ya sin la barra azul marino.
+- **Burbujas**: el cliente va oscuro (claro en Noche) y la respuesta en
+  pastilla. `.burbuja-in` y `.burbuja-out` redeclaran los neutros adentro: la
+  hora, la cita, los enlaces y los documentos se leen sin tocar cada
+  componente.
+- **El compositor** es una cápsula, con el botón redondo de enviar o grabar
+  aparte, en la tinta del tema.
+- **La letra** es Urbanist; Archivo queda cargada para la 062.
+- **Del acento oscuro**: el fondo de referencia del cálculo (`DARK_BG`) sigue
+  a Noche, y el tint y el soft se ajustaron para que la fila elegida y el
+  anillo de foco pasen sus pisos.
+
+**Cómo se probó**:
+
+- `contraste-temas.test.ts` cambia la barra bicolor (ya no existe) por:
+  - tarjeta contra marco;
+  - el riel activo y el envío;
+  - lo de adentro de cada burbuja.
+- Unitarias: 1 366, con banderas apagadas y encendidas.
+- Arnés nuevo `e2e-diseno-061.mjs`: 40/40, en claro y oscuro, a 1440 y 390.
+- Arneses de la Bandeja y vecinos en verde: filtros, reenviar, eventos,
+  atajos, notas, avisos, conexión, borradores, PWA, imágenes, citar,
+  búsqueda, respuestas rápidas, notas de voz, ligas y anuncio de origen.
+- `e2e-responsive` todo en verde, con los checks del menú puestos al día;
+  también pasó el del cerebro, que fallaba antes.
+- Self-test general en base limpia: **280/280**.
+
+**Capturas**: `docs/061/antes-…` (2.4.0) y `docs/061/despues-…`, en claro y
+oscuro, a 1440 y a 390.
+
+**Lo que salió mal**:
+
+1. **El indicador de Next en dev** tapaba la cuenta del riel y los clics de
+   los arneses se quedaban esperando. Se apagó (`devIndicators: false`, solo
+   dev).
+2. **`pnpm lint` revisaba los worktrees** de las sesiones 060a y 060b dentro
+   de `.claude/worktrees` (8 300 errores ajenos). Se corrió con
+   `--ignore-pattern ".claude/**"`; el CI no los ve.
+3. **Varios arneses** buscaban en el menú de texto lo que ahora vive en el
+   menú de la cuenta (avisos, instalar, cerrar sesión). Abren ese menú primero.
+
+## 2026-10-24 — 062: Ajustes → Apariencia
+
+**Qué pidió Kevin**: «diversos temas, como Ableton… incluso tipo de letra y
+tamaños», en Ajustes, con un tema del negocio que cada quien pueda cambiar.
+
+**Qué cambió**:
+
+- **`src/lib/temas.ts`** (puro):
+  - 8 temas listos: Menta, Noche, Vocero, Vocero oscuro, Papel, Carbón,
+    Medianoche y Alto contraste. Cada uno con modo, pareja y tokens; Menta y
+    Noche son la base de `globals.css`.
+  - El tema propio, armado con tres colores (fondo, texto y marco), que no
+    se acepta si no se lee.
+  - Letras (Urbanist, Archivo, Inter, IBM Plex Sans), tamaños (93 %, 100 % y
+    110 %) y densidades.
+  - La resolución cookie → negocio → Vocero, validada con Zod.
+- **El layout raíz** escribe `data-tema`, `data-letra`, `data-tamano` y
+  `data-densidad` en el servidor, e inyecta los temas listos en el `<head>`:
+  sin parpadeo y con cambio en vivo.
+  - El tamaño es un `zoom` en la app, con su altura corregida por la escala.
+  - La densidad cambia `--row-py` y el espacio entre tarjetas (`--hueco`).
+- **El predeterminado del negocio** va en `organization.metadata.apariencia`,
+  por `PUT /api/settings/appearance`, solo para quien configura (si no, 403).
+  La elección de cada persona va en la cookie `vocero-apariencia`. Quien ya
+  tenía el oscuro con el botón de antes ve la pareja oscura del tema del
+  negocio.
+- **El sol y la luna** saltan a la pareja del tema.
+- **La pantalla**:
+  - tarjetas de tema con su miniatura de la Bandeja;
+  - los tres colores del propio, con su aviso;
+  - letra, tamaño y densidad;
+  - «Guardar para mí», «Guardar como predeterminado del negocio» y «Usar el
+    del negocio».
+
+**Cómo se probó**:
+
+- `temas.test.ts`: cada tema pasa los pisos de la 061, más el tema propio, la
+  resolución de la cookie y la copia de la miniatura.
+- `apariencia-route.test.ts`: el 403 y los 422.
+- `nav.test.ts`, puesto al día con el enlace nuevo.
+- `e2e-apariencia.mjs`: 23/23.
+- Los arneses del diseño y la Bandeja siguen en verde con la apariencia
+  conectada: diseño 40/40, responsive, filtros, reenviar, atajos, avisos,
+  borradores, PWA, eventos, notas, búsqueda e imágenes.
+
+**Tiempos reales**: self-test 280/280 a las 01:16 (24 oct).
+
+**Capturas** (`docs/062/`): la Bandeja con cada uno de los 8 temas
+(`tema-…`), Papel, el tema propio, Inter grande compacta y 390 px.
+
+## 2026-10-24 — 062, enmienda: la apariencia se guarda sola
+
+**Qué pidió Kevin**, al probar la rc.3 desde el celular («se ve muy bien»):
+
+- que los cambios de tema se guarden sin pulsar «Guardar»;
+- que afecten solo a quien los hace;
+- que haya un botón para todo el equipo, solo para administradores.
+
+**Qué cambió**:
+
+- Cada cambio se pinta y se guarda al momento en la cookie de esa persona.
+  Un tema propio ilegible no se guarda.
+- «Guardar para mí» desaparece.
+- Para el equipo queda «Aplicar a todo el equipo», solo para el dueño y los
+  administradores; la API sigue en 403 para los demás.
+- «Usar la del equipo» vuelve a la apariencia del equipo.
+
+**Cómo se probó**: `e2e-apariencia.mjs` 25/25, sin pulsar «guardar»: recarga
+y comprueba la cookie. Typecheck, lint, test y build en verde.
+
+## 2026-10-24 — 062, arreglo: el contorno de Alto contraste se cortaba
+
+**Qué vio Kevin** probando los temas en casa («me dejaste sin palabras»): en
+Alto contraste, su favorito, las líneas de las tarjetas se interrumpían
+arriba.
+
+**Por qué**:
+
+- El contorno era una sombra por fuera (`box-shadow 0 0 0 1.5px`). Donde la
+  tarjeta toca el borde de la app (`overflow: hidden`), se recortaba.
+- Un `outline` hacia adentro tampoco bastó: la cabecera sticky del panel de
+  Detalles se pintaba encima.
+
+**Arreglo**: el contorno es un `::after` de la tarjeta (`inset: 0`,
+`z-index: 25`, `pointer-events: none`), encima de todo su contenido. Lo pinta
+el token `--contorno-tarjeta`, que solo usa Alto contraste. La tarjeta pasa a
+`position: relative`, y el buscador en cápsula también es una tarjeta.
+
+**Cómo se probó**:
+
+- `e2e-apariencia.mjs` ganó el check «cada tarjeta lleva su contorno encima
+  del contenido»: 26/26.
+- Diseño 40/40, filtros, atajos, reenviar, avisos y conexión, y responsive en
+  verde.
+- Typecheck, lint, test y build en verde.

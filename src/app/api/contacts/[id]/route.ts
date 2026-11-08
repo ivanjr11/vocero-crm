@@ -60,7 +60,7 @@ const patchSchema = z.object({
    * corrige, y mandar la ficha entera haría que el último en guardar le
    * borrara lo recién descubierto al otro.
    */
-  ficha: z.record(z.unknown()).optional(),
+  ficha: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const PATCH = withAuth(async (session, req: Request, ctx: Params) => {

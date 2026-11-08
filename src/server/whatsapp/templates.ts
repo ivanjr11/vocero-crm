@@ -11,6 +11,7 @@ import { destinatarioMeta } from "@/lib/meta/destinatario";
 import { scoped } from "@/lib/db/tenant";
 import { publish } from "@/server/events/bus";
 import {
+  cuentaDePlantillas,
   getCredentialsByOrg,
   getCredentialsByWabaId,
   markReconnectRequired,
@@ -104,8 +105,10 @@ export async function createTemplate(
   );
   let waTemplateId: string | null = null;
   try {
+    // 065: desde el split de 2026, las plantillas se crean en la Cuenta de
+    // mensajes; en la de WhatsApp Meta responde #100/2388339.
     const res = await graphRequest<{ id?: string; status?: string }>(
-      `${creds.wabaId}/message_templates`,
+      `${cuentaDePlantillas(creds)}/message_templates`,
       {
         method: "POST",
         token: creds.token,
@@ -134,6 +137,12 @@ export async function createTemplate(
       }
       if (err.status === 0 || err.status >= 500) {
         throw new TemplateError("meta_unavailable", "Meta no está disponible ahora");
+      }
+      if (esCuentaSinPlantillas(err) && !creds.messagingAccountId) {
+        throw new TemplateError(
+          "meta_error",
+          "Meta ya no crea plantillas en la cuenta de WhatsApp: ahora viven en la Cuenta de mensajes. Agrega su ID en Ajustes → WhatsApp (Business Settings › Cuentas › Cuentas de mensajes) y vuelve a intentarlo."
+        );
       }
       throw new TemplateError("meta_error", err.message);
     }
@@ -172,6 +181,20 @@ export async function createTemplate(
   return inserted[0]!;
 }
 
+/**
+ * 065 — `#100` subcode `2388339`, «This API is not supported for this
+ * WhatsApp Business Account»: la llamada fue a la Cuenta de WhatsApp y Meta
+ * ya solo la acepta en la Cuenta de mensajes.
+ */
+export function esCuentaSinPlantillas(err: MetaApiError): boolean {
+  const detalle = (err.details as { error?: { error_subcode?: unknown } } | null)
+    ?.error;
+  return (
+    Number(detalle?.error_subcode) === 2388339 ||
+    /not supported for this WhatsApp Business Account/i.test(err.message)
+  );
+}
+
 function mapMetaStatus(
   status: string | undefined
 ): TemplateRow["status"] | null {
@@ -184,10 +207,92 @@ function mapMetaStatus(
   return null;
 }
 
+type RemoteComponent = {
+  type?: string;
+  format?: string;
+  text?: string;
+  buttons?: { type?: string; url?: string; text?: string }[];
+};
+
+export type RemoteTemplate = {
+  id?: string;
+  name?: string;
+  language?: string;
+  status?: string;
+  category?: string;
+  rejected_reason?: string;
+  components?: RemoteComponent[];
+};
+
+const VARIABLE_RE = /\{\{\s*\d+\s*\}\}/;
+
 /**
- * Sincroniza estados desde Graph (`GET {waba}/message_templates`). Cubre el
+ * 065 (puerto de la spec 101 de un fork): convierte una plantilla que ya
+ * existe en Meta (creada en el Administrador de WhatsApp, o la `hello_world`
+ * que trae toda cuenta) en una fila que Vocero sabe enviar. Vocero solo manda
+ * parámetros del CUERPO, así que se importa únicamente lo que no pide nada
+ * más: encabezado de texto fijo, pie y botones sin variables. Lo demás
+ * (encabezado con imagen, botón de URL dinámica, autenticación) se deja fuera
+ * — importarlo sería ofrecer una plantilla que Meta rechaza al enviar.
+ */
+export function importableTemplate(remote: RemoteTemplate): {
+  name: string;
+  language: string;
+  category: string;
+  body: string;
+  status: TemplateRow["status"];
+  waTemplateId: string | null;
+  rejectionReason: string | null;
+} | null {
+  const status = mapMetaStatus(remote.status);
+  if (!status || !remote.name || !remote.language) return null;
+  const category = (remote.category ?? "").toUpperCase();
+  if (category !== "UTILITY" && category !== "MARKETING") return null;
+  const components = remote.components ?? [];
+  const body = components.find((c) => (c.type ?? "").toUpperCase() === "BODY")?.text;
+  if (!body || validateBodyVariables(body)) return null;
+  for (const c of components) {
+    const type = (c.type ?? "").toUpperCase();
+    if (type === "BODY" || type === "FOOTER") continue;
+    if (type === "HEADER") {
+      if ((c.format ?? "TEXT").toUpperCase() !== "TEXT") return null;
+      if (VARIABLE_RE.test(c.text ?? "")) return null;
+      continue;
+    }
+    if (type === "BUTTONS") {
+      const ok = (c.buttons ?? []).every((b) => {
+        const t = (b.type ?? "").toUpperCase();
+        if (t === "QUICK_REPLY" || t === "PHONE_NUMBER") return true;
+        return t === "URL" && !VARIABLE_RE.test(b.url ?? "");
+      });
+      if (!ok) return null;
+      continue;
+    }
+    return null;
+  }
+  return {
+    name: remote.name,
+    language: remote.language,
+    category,
+    body,
+    status,
+    waTemplateId: remote.id ?? null,
+    rejectionReason: remote.rejected_reason ?? null,
+  };
+}
+
+const TEMPLATE_FIELDS =
+  "id,name,language,status,category,rejected_reason,components";
+
+/**
+ * Sincroniza estados desde Graph (`GET {cuenta}/message_templates`). Cubre el
  * modo agencia: los webhooks de plantillas NO siguen el override de callback,
  * así que el pull es la vía universal (DV-VC-04/DV-VC-15).
+ *
+ * 065: lee la Cuenta de mensajes si se conoce, recorre la paginación y además
+ * IMPORTA las plantillas que Vocero no conocía (creadas fuera de Vocero), si
+ * se pueden enviar desde aquí. Devuelve cuántas filas cambió: actualizadas +
+ * importadas.
  */
 export async function syncTemplates(organizationId: string): Promise<number> {
   const creds = await getCredentialsByOrg(organizationId);
@@ -195,13 +300,29 @@ export async function syncTemplates(organizationId: string): Promise<number> {
     throw new TemplateError("not_connected", "Conecta tu número de WhatsApp primero");
   }
 
-  let data: {
-    data?: { id?: string; name?: string; language?: string; status?: string; category?: string; quality_score?: unknown; rejected_reason?: string }[];
-  };
+  const cuenta = cuentaDePlantillas(creds);
+  const remotes: RemoteTemplate[] = [];
   try {
-    data = await graphRequest(`${creds.wabaId}/message_templates`, {
-      token: creds.token,
-    });
+    let after: string | undefined;
+    // Paginado por cursor hasta que Meta no dé `paging.next`: una cuenta
+    // verificada puede tener hasta 6.000 plantillas (60 páginas de 100). Se
+    // corta si Meta repite un cursor; el tope de páginas es solo la red final.
+    const vistos = new Set<string>();
+    for (let page = 0; page < 100; page += 1) {
+      const res: {
+        data?: RemoteTemplate[];
+        paging?: { cursors?: { after?: string }; next?: string };
+      } | null = await graphRequest(
+        `${cuenta}/message_templates?fields=${TEMPLATE_FIELDS}&limit=100${
+          after ? `&after=${encodeURIComponent(after)}` : ""
+        }`,
+        { token: creds.token }
+      );
+      remotes.push(...(Array.isArray(res?.data) ? res.data : []));
+      after = res?.paging?.next ? res.paging.cursors?.after : undefined;
+      if (!after || vistos.has(after)) break;
+      vistos.add(after);
+    }
   } catch (err) {
     if (err instanceof MetaApiError) {
       if (err.isAuthError) {
@@ -220,7 +341,7 @@ export async function syncTemplates(organizationId: string): Promise<number> {
     .where(scoped(schema.template.organizationId, organizationId));
 
   let updated = 0;
-  for (const remote of data.data ?? []) {
+  for (const remote of remotes) {
     const status = mapMetaStatus(remote.status);
     if (!status) continue;
     const match = local.find(
@@ -228,7 +349,17 @@ export async function syncTemplates(organizationId: string): Promise<number> {
         (remote.id && t.waTemplateId === remote.id) ||
         (t.name === remote.name && t.language === remote.language)
     );
-    if (!match) continue;
+    if (!match) {
+      const row = importableTemplate(remote);
+      if (!row) continue;
+      const nueva = await db
+        .insert(schema.template)
+        .values({ id: newId("template"), organizationId, ...row })
+        .onConflictDoNothing()
+        .returning({ id: schema.template.id });
+      if (nueva.length > 0) updated += 1;
+      continue;
+    }
     // Meta reclasifica la categoría al aprobar (una UTILITY puede volverse
     // MARKETING, lo que cambia el costo por conversación): es autoridad.
     const category = remote.category ?? match.category;
